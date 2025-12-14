@@ -12,14 +12,14 @@ st.set_page_config(page_title="OR-minor Schedule Dashboard", layout="wide")
 st.title("OR-minor Schedule Dashboard 📊")
 
 # ===============================
-# PASSWORD PROTECTION
+# PASSWORD PROTECTION (จำรหัสได้จนปิดเบราว์เซอร์)
 # ===============================
 try:
     PASSWORD = st.secrets["APP_PASSWORD"]
 except:
     PASSWORD = "pghnurse30"  # รหัส default สำหรับทดสอบในเครื่อง
 
-# ตรวจสอบว่าผ่านการ login แล้วหรือยัง
+# สร้าง session state
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
@@ -27,8 +27,9 @@ if not st.session_state["authenticated"]:
     st.markdown("### 🔐 เข้าสู่ระบบ OR Dashboard")
     col1, col2 = st.columns([1, 2])
     with col2:
-        password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="password_input")
-        if st.button("เข้าสู่ระบบ", key="login_button"):
+        # เพิ่ม key คงที่ เพื่อไม่ให้ widget เปลี่ยนทุก rerun
+        password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="password_fixed")
+        if st.button("เข้าสู่ระบบ", key="login_fixed"):
             if password_input == PASSWORD:
                 st.session_state["authenticated"] = True
                 st.success("เข้าสู่ระบบสำเร็จ! 🎉")
@@ -36,7 +37,7 @@ if not st.session_state["authenticated"]:
             else:
                 st.error("รหัสผ่านไม่ถูกต้อง")
     st.stop()
-# ถ้าผ่านแล้ว → ไม่ถามอีก จนกว่าจะปิดเบราว์เซอร์
+# ถ้า authenticated = True → ไม่ถามอีกจนกว่าจะปิดเบราว์เซอร์หรือแท็บ
 # ===============================
 # Helper: dataframe width compat
 # ===============================
@@ -557,5 +558,6 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
+
 
 
