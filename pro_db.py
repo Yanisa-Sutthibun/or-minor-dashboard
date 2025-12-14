@@ -38,16 +38,21 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ===============================
-# GOOGLE SHEET CONNECTION (ใช้ gspread-pandas)
+# GOOGLE SHEET CONNECTION (เวอร์ชันใหม่ ไม่ error)
 # ===============================
 SHEET_ID = "1xseEQo0ZqGrVA00yn9Y4LZtCw3kEb2zTF6ao4IbjfyA"
 SHEET_NAME = "Sheet1"
 
 @st.cache_resource(ttl=60)
-def get_spread():
-    spread = Spread(SHEET_ID, sheet=SHEET_NAME, config=st.secrets["gcp_service_account"])
-    return spread
-
+def get_sheet():
+    from google.oauth2.service_account import Credentials
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ])
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+    return sheet
 # ===============================
 # SIDEBAR: UPLOAD FILE (Admin only)
 # ===============================
@@ -320,3 +325,4 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
+
