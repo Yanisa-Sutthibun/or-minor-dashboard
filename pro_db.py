@@ -13,6 +13,22 @@ st.markdown(
     "<h1 style='font-size:34px; margin-bottom: 0.2rem;'>OR-minor Schedule Dashboard 📊</h1>",
     unsafe_allow_html=True
 )
+
+# ===============================
+# Small divider (แทน st.divider / ---)
+# ===============================
+def small_divider(width_pct: int = 55, thickness_px: int = 2, color: str = "#e0e0e0", margin_px: int = 12):
+    st.markdown(
+        f"""
+        <div style="
+            width: {width_pct}%;
+            margin: {margin_px}px auto;
+            border-bottom: {thickness_px}px solid {color};
+        "></div>
+        """,
+        unsafe_allow_html=True
+    )
+
 # ===============================
 # PASSWORD PROTECTION
 # ===============================
@@ -52,7 +68,8 @@ with top_c3:
         st.session_state["authenticated"] = False
         st.rerun()
 
-st.divider()
+# แทน st.divider()
+small_divider(width_pct=70, thickness_px=2, color="#e6e6e6", margin_px=10)
 
 # ===============================
 # Helper: dataframe width compat
@@ -354,27 +371,39 @@ if "opedate" in df_raw.columns:
         month_names = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
                        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
         op_date_str = f"{day_op} {month_names[month_op]} {year_th_op}"
+
         st.markdown(
-    f"""
-    <div style="
-        text-align: center;
-        font-size: 26px;
-        font-weight: 600;
-        color: #1f77b4;
-        margin: 12px 0 4px 0;
-    ">
-        📅 ตารางผ่าตัดวันที่ {op_date_str}
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+            f"""
+            <div style="
+                text-align: center;
+                font-size: 24px;
+                font-weight: 600;
+                color: #1f77b4;
+                margin: 10px 0 4px 0;
+            ">
+                📅 ตารางผ่าตัดวันที่ {op_date_str}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        # เส้นใต้หัวข้อแบบสั้น
+        small_divider(width_pct=35, thickness_px=2, color="#d7ecff", margin_px=8)
 
     else:
-        st.markdown("<h2 style='text-align: center;'>📅 ตารางผ่าตัด</h2>", unsafe_allow_html=True)
+        st.markdown(
+            "<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>",
+            unsafe_allow_html=True
+        )
+        small_divider(width_pct=25, thickness_px=2, color="#eeeeee", margin_px=8)
 else:
-    st.markdown("<h2 style='text-align: center;'>📅 ตารางผ่าตัด</h2>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>",
+        unsafe_allow_html=True
+    )
+    small_divider(width_pct=25, thickness_px=2, color="#eeeeee", margin_px=8)
 
-st.markdown("---")
+# แทน st.markdown("---")
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 st.subheader("📊 OR-Minor Summary")
 
@@ -396,7 +425,7 @@ for i, cat in enumerate(display_cats):
         st.markdown(f"<h4 style='text-align: center; color: black;'>{cat}</h4>", unsafe_allow_html=True)
         st.markdown(f"<h2 style='text-align: center; color: black; margin-top: -10px;'>{count}</h2>", unsafe_allow_html=True)
 
-st.markdown("---")
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # Operation On-going Card
 st.subheader("⏳ Operation On-going")
@@ -450,7 +479,7 @@ with status_cols[1]:
 with status_cols[2]:
     st.markdown(f"<p style='text-align: right; color: #d73a3a; font-weight: bold; margin-top: 20px;'><strong>⏳ เหลือเคสที่ยังไม่เสร็จ:</strong> {remaining_cases} ราย</p>", unsafe_allow_html=True)
 
-st.markdown("---")
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # รายการผ่าตัดวันนี้
 st.subheader("✅ รายการผ่าตัดวันนี้")
@@ -498,7 +527,7 @@ if available_cols:
                 st.rerun()
 
     if has_completed:
-        st.markdown("---")
+        small_divider(width_pct=60, thickness_px=1, color="#eeeeee", margin_px=10)
         st.caption("**✅ เคสที่เสร็จแล้ว**")
         for idx, row in df_patient.iterrows():
             if idx not in completed:
@@ -517,7 +546,7 @@ if available_cols:
 else:
     st.info("ไม่พบคอลัมน์ที่ต้องการสำหรับแสดงรายการผู้ป่วย")
 
-st.markdown("---")
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # Daily case summary
 st.subheader("📈 Daily case summary (เช้า/บ่าย/TF)")
@@ -545,7 +574,7 @@ if not active_categories and "Other" in summary_df.columns:
 
 df_show(summary_df[display_cols], stretch=True)
 
-st.markdown("---")
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # Other review
 st.subheader("🔍 Operation นอกเหนือที่ตั้งค่าไว้ (Other review)")
@@ -562,5 +591,3 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
-
-
