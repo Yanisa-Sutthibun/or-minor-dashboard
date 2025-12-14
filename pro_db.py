@@ -337,22 +337,14 @@ st.subheader("🔧 Google Sheet Connection Debug")
 
 try:
     ws = get_worksheet()
-    st.success("✅ Auth ผ่าน และเปิด Spreadsheet ได้")
+    st.success("✅ ต่อ Google Sheet ได้แล้ว")
+    st.write("Spreadsheet title:", ws.spreadsheet.title)
     st.write("Worksheet title:", ws.title)
-
-    # ลองอ่าน 3 แถวแรก
-    vals = ws.get_all_values()[:3]
-    st.write("Preview (first 3 rows):")
-    st.json(vals)
-
-    # ลองเขียน/อ่านกลับ (ทดสอบสิทธิ์แก้ไข)
-    ws.update("A1", [["PING"]])
-    st.success("✅ Write test ผ่าน (มีสิทธิ์แก้ไข)")
-
 except Exception as e:
     st.error("❌ ต่อ Google Sheet ไม่ได้")
     st.code(str(e))
     st.stop()
+
 
 def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -678,6 +670,7 @@ else:
         df_show(unk_df, stretch=True)
 
 # ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
+
 
 
 
