@@ -39,18 +39,26 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ===============================
-# GOOGLE SHEET CONNECTION (ใช้ gspread มาตรฐาน)
+# GOOGLE SHEET CONNECTION (เวอร์ชันเสถียรที่สุด)
 # ===============================
 SHEET_ID = "1xseEQo0ZqGrVA00yn9Y4LZtCw3kEb2zTF6ao4IbjfyA"
 SHEET_NAME = "Sheet1"
 
 @st.cache_resource(ttl=60)
 def get_sheet():
-    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-    return sheet
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    try:
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+        return sheet
+    except Exception as e:
+        st.error("ไม่สามารถเชื่อมต่อ Google Sheet ได้")
+        st.info("ตรวจสอบ Secrets และการแชร์ Sheet ให้ Service Account")
+        st.stop()
 
 # ===============================
 # SIDEBAR: UPLOAD FILE (Admin only)
@@ -75,6 +83,7 @@ if uploaded_file is not None:
         # บันทึกข้อมูลลง Google Sheet
         sheet = get_sheet()
         sheet.clear()
+        # เขียน header + data
         sheet.append_row(df_raw.columns.tolist())
         sheet.append_rows(df_raw.values.tolist())
     except Exception as e:
@@ -102,7 +111,13 @@ except Exception as e:
     st.stop()
 
 # ===============================
-# MAIN CONTENT (ส่วนที่เหลือเหมือนเดิม)
+# UPLOAD TIME + COMPLETED STATE
+# ===============================
+if "completed_cases" not in st.session_state:
+    st.session_state["completed_cases"] = set()
+
+# ===============================
+# MAIN CONTENT
 # ===============================
 st.divider()
 
