@@ -10,22 +10,6 @@ import re
 st.set_page_config(page_title="OR-minor Schedule Dashboard", layout="wide")
 st.title("OR-minor Schedule Dashboard")
 
-'''# Password protection
-PASSWORD = st.secrets.get("APP_PASSWORD", "pghnurse30")  # ตั้งรหัสจริงใน Secrets ของ Streamlit Cloud
-
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-
-if not st.session_state["authenticated"]:
-    password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password")
-    if st.button("เข้าสู่ระบบ"):
-        if password_input == PASSWORD:
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.error("รหัสผ่านไม่ถูกต้อง")
-    st.stop()'''
-
 # ส่วนโค้ดหลักต่อจากนี้...
 # ===============================
 # Helper: dataframe width compat
@@ -558,4 +542,5 @@ else:
         df_show(unk_df, stretch=True)
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
+
     df_show(df_raw.head(50), stretch=True)
