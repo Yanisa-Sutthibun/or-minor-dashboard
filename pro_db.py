@@ -4,8 +4,7 @@ import numpy as np
 import datetime as dt
 import re
 from io import BytesIO
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from gspread_pandas import Spread, Client
 
 # ===============================
 # 0) CONFIG
@@ -39,18 +38,15 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ===============================
-# GOOGLE SHEET CONNECTION
+# GOOGLE SHEET CONNECTION (ใช้ gspread-pandas)
 # ===============================
 SHEET_ID = "1xseEQo0ZqGrVA00yn9Y4LZtCw3kEb2zTF6ao4IbjfyA"
 SHEET_NAME = "Sheet1"
 
 @st.cache_resource(ttl=60)
-def get_sheet():
-    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-    return sheet
+def get_spread():
+    spread = Spread(SHEET_ID, sheet=SHEET_NAME, config=st.secrets["gcp_service_account"])
+    return spread
 
 # ===============================
 # SIDEBAR: UPLOAD FILE (Admin only)
@@ -73,9 +69,8 @@ if uploaded_file is not None:
         st.sidebar.success("อัปโหลดและบันทึกข้อมูลสำเร็จ!")
         
         # บันทึกข้อมูลลง Google Sheet
-        sheet = get_sheet()
-        sheet.clear()
-        sheet.append_rows([df_raw.columns.tolist()] + df_raw.values.tolist())
+        spread = get_spread()
+        spread.df_to_sheet(df_raw, index=False, sheet=SHEET_NAME, replace=True)
     except Exception as e:
         st.sidebar.error(f"ไม่สามารถอ่านหรือบันทึกไฟล์ได้: {str(e)}")
         st.sidebar.info("ลองบันทึกไฟล์ใหม่จาก Excel แล้วอัปโหลดอีกครั้ง")
@@ -84,12 +79,8 @@ if uploaded_file is not None:
 # LOAD DATA FROM SHEET (ทุกเครื่องดึงจากที่นี่)
 # ===============================
 try:
-    sheet = get_sheet()
-    data = sheet.get_all_values()
-    if len(data) <= 1:  # มีแค่ header หรือว่าง
-        st.info("ยังไม่มีข้อมูลใน Sheet — รอ Admin อัปโหลดไฟล์")
-        st.stop()
-    df_raw = pd.DataFrame(data[1:], columns=data[0])
+    spread = get_spread()
+    df_raw = spread.sheet_to_df(index=None)
     df_raw = df_raw.replace("", np.nan)
     df_raw = df_raw.dropna(how="all")
     if df_raw.empty:
@@ -101,7 +92,7 @@ except Exception as e:
     st.stop()
 
 # ===============================
-# MAIN CONTENT (ส่วนที่เหลือเหมือนเดิม)
+# MAIN CONTENT
 # ===============================
 st.divider()
 
