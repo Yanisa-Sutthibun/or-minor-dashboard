@@ -386,9 +386,6 @@ if "opedate" in df_raw.columns:
             """,
             unsafe_allow_html=True
         )
-        # เส้นใต้หัวข้อแบบสั้น
-        small_divider(width_pct=35, thickness_px=2, color="#d7ecff", margin_px=8)
-
     else:
         st.markdown(
             "<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>",
@@ -591,3 +588,4 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
+
