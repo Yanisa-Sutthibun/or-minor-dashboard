@@ -307,13 +307,6 @@ def _require_sheet_config():
     if "gcp_service_account" not in st.secrets:
         st.error("ยังไม่ได้ตั้งค่า gcp_service_account ใน secrets")
         st.stop()
-    try:
-        ws = get_worksheet()
-        st.success("เชื่อมต่อ Google Sheet ได้แล้ว")
-    except Exception as e:
-        st.error("Google Sheet error:")
-        st.code(str(e))
-        st.stop()
 
 @st.cache_resource(ttl=300)
 def get_worksheet():
@@ -322,41 +315,24 @@ def get_worksheet():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=scopes
+    )
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SHEET_ID)
     ws = sh.worksheet(SHEET_NAME)
     return ws
 
-def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
-    # ตัดคอลัมน์ระบุตัวบุคคล/เสี่ยงหลุด
-    pii_cols = [
-        "dspname", "surgstfnm", "surgeon", "anesthetist", "hn", "an",
-        "patient", "name", "firstname", "lastname"
-    ]
-    safe = df.drop(columns=[c for c in pii_cols if c in df.columns], errors="ignore").copy()
+def test_google_sheet_connection():
+    try:
+        _ = get_worksheet()
+        st.success("เชื่อมต่อ Google Sheet ได้แล้ว")
+    except Exception as e:
+        st.error("Google Sheet error:")
+        st.code(str(e))
+        st.stop()
 
-    # ใส่ timestamp เพื่อให้ทุกเครื่องรู้ว่าอัปโหลดล่าสุดเมื่อไร
-    safe["__upload_ts__"] = dt.datetime.now().isoformat(timespec="seconds")
-    return safe
-
-def write_df_to_sheet(ws, df: pd.DataFrame):
-    df2 = df.replace({np.nan: ""}).copy()
-    values = [df2.columns.tolist()] + df2.astype(str).values.tolist()
-    ws.clear()
-    ws.update(values)  # gspread v5+ ใช้แบบนี้ได้
-
-@st.cache_data(ttl=60)
-def read_df_from_sheet():
-    ws = get_worksheet()
-    values = ws.get_all_values()
-    if not values or len(values) < 2:
-        return pd.DataFrame()
-    header = values[0]
-    rows = values[1:]
-    df = pd.DataFrame(rows, columns=header)
-    df = df.replace({"": np.nan}).dropna(how="all")
-    return df
 
 # ===============================
 # SIDEBAR: UPLOAD (ไม่มี admin password แล้ว)
@@ -640,3 +616,5 @@ else:
         st.caption("ใช้รายการนี้เพิ่ม ALIASES หรือ pattern ได้")
         df_show(unk_df, stretch=True)
 
+test_google_sheet_connection()
+df_raw = read_df_from_sheet()
