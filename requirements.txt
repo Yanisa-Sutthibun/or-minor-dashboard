@@ -1,5 +1,7 @@
 streamlit
 pandas
 openpyxl
-pyexcel
-pyexcel-xls
+xlrd
+gspread
+gspread-pandas
+oauth2client
