@@ -38,10 +38,24 @@ def df_show(df, stretch: bool = True):
 # ===============================
 # PASSWORD PROTECTION (viewer login)
 # ===============================
-try:
-    PASSWORD = st.secrets["APP_PASSWORD"]
-except Exception:
-    PASSWORD = "pghnurse30"
+PASSWORD = st.secrets.get("APP_PASSWORD", "pghnurse30")
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.markdown("### 🔐 เข้าสู่ระบบ OR Dashboard")
+    c1, c2 = st.columns([1, 2])
+    with c2:
+        pw = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="pw_input")
+        if st.button("เข้าสู่ระบบ", key="login_btn"):
+            if pw == PASSWORD:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("รหัสผ่านไม่ถูกต้อง")
+    st.stop()
+
 # ===============================
 # TOP BAR
 # ===============================
@@ -182,6 +196,7 @@ def classify_proc_category(proc_text: str, use_fuzzy: bool = False, threshold: i
         "Eyelid correction": ["ptosis correction", "eyelid correction"],
         "Facelift": ["facelift"],
     }
+
     all_choices = [(cat, term) for cat, terms in CANON.items() for term in terms]
     choices = [term for _, term in all_choices]
     best = process.extractOne(s, choices, scorer=fuzz.token_set_ratio)
@@ -307,67 +322,47 @@ def get_worksheet():
     return ws
 
 def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    ป้องกันข้อมูลหลุด: ตัดคอลัมน์ระบุตัวบุคคล ก่อนเขียนลง Sheet
-    (ชื่อผู้ป่วย/ชื่อแพทย์/รหัสใดๆ ที่เสี่ยง)
-    """
-    drop_cols = []
-    for c in ["dspname", "surgstfnm", "surgeon", "anesthetist", "hn", "an", "patient", "name"]:
-        if c in df.columns:
-            drop_cols.append(c)
-    safe = df.drop(columns=drop_cols, errors="ignore").copy()
+    # ตัดคอลัมน์ระบุตัวบุคคล/เสี่ยงหลุด
+    pii_cols = [
+        "dspname", "surgstfnm", "surgeon", "anesthetist", "hn", "an",
+        "patient", "name", "firstname", "lastname"
+    ]
+    safe = df.drop(columns=[c for c in pii_cols if c in df.columns], errors="ignore").copy()
 
-    # เก็บเฉพาะคอลัมน์ที่ dashboard ต้องใช้จริง (กันพลาดมีข้อมูลแถมมา)
-    keep_priority = []
-    for c in ["opedate", "estmtime", "icd9cm_name", "procnote"]:
-        if c in safe.columns:
-            keep_priority.append(c)
-
-    # ถ้าไฟล์มีคอลัมน์อื่นก็ยังอนุญาต (เพื่อ summary) แต่ห้ามคอลัมน์ชื่อคน
-    # ถ้าอยากล็อกให้เหลือเท่านี้จริงๆ ให้ uncomment บรรทัดถัดไป
-    # safe = safe[keep_priority].copy()
-
-    # ใส่ timestamp เพื่อให้ทุกเครื่องเห็นว่าอัปโหลดล่าสุดเมื่อไร
+    # ใส่ timestamp เพื่อให้ทุกเครื่องรู้ว่าอัปโหลดล่าสุดเมื่อไร
     safe["__upload_ts__"] = dt.datetime.now().isoformat(timespec="seconds")
     return safe
 
 def write_df_to_sheet(ws, df: pd.DataFrame):
-    df2 = df.copy()
-    df2 = df2.replace({np.nan: ""})
+    df2 = df.replace({np.nan: ""}).copy()
     values = [df2.columns.tolist()] + df2.astype(str).values.tolist()
     ws.clear()
-    ws.update(values)
+    ws.update(values)  # gspread v5+ ใช้แบบนี้ได้
 
 @st.cache_data(ttl=60)
 def read_df_from_sheet():
     ws = get_worksheet()
-    records = ws.get_all_records()  # first row header
-    if not records:
+    values = ws.get_all_values()
+    if not values or len(values) < 2:
         return pd.DataFrame()
-    df = pd.DataFrame(records)
-    df = df.replace({"": np.nan})
-    df = df.dropna(how="all")
+    header = values[0]
+    rows = values[1:]
+    df = pd.DataFrame(rows, columns=header)
+    df = df.replace({"": np.nan}).dropna(how="all")
     return df
 
 # ===============================
-# SIDEBAR: ADMIN UPLOAD ONLY
+# SIDEBAR: UPLOAD (ไม่มี admin password แล้ว)
 # ===============================
 with st.sidebar:
-    st.header("Upload file (Admin only)")
-    admin_pw = st.text_input("Admin password", type="password", key="admin_pw")
-    is_admin = (admin_pw == ADMIN_PASSWORD) if admin_pw else False
-
+    st.header("Upload file")
     uploaded_file = st.file_uploader(
         "อัปโหลดไฟล์ Excel (.xlsx หรือ .xls)",
         type=["xlsx", "xls"],
-        disabled=not is_admin,
         key="uploader_admin"
     )
 
-    if not is_admin:
-        st.caption("กรอก Admin password เพื่อเปิดอัปโหลด")
-
-    if uploaded_file is not None and is_admin:
+    if uploaded_file is not None:
         try:
             file_name = uploaded_file.name.lower()
             file_bytes = uploaded_file.read()
@@ -393,7 +388,7 @@ with st.sidebar:
         except Exception as e:
             st.error("อัปโหลด/บันทึกไม่สำเร็จ")
             st.caption(str(e))
-            st.caption("ให้เช็ก: secrets + แชร์ Sheet ให้ service account")
+            st.caption("เช็ก: secrets + แชร์ Sheet ให้ service account (Editor)")
 
 # ===============================
 # LOAD DATA FROM SHEET (ทุกเครื่องดึงจากที่นี่)
@@ -403,11 +398,11 @@ try:
 except Exception as e:
     st.error("ไม่สามารถเชื่อมต่อ Google Sheet ได้")
     st.caption(str(e))
-    st.info("ให้เช็ก: secrets และแชร์ Sheet ให้ service account email")
+    st.info("เช็ก: 1) แชร์ Sheet ให้ service account 2) สร้าง key ใหม่ 3) secrets ถูกต้อง")
     st.stop()
 
 if df_raw is None or df_raw.empty:
-    st.info("ยังไม่มีข้อมูลใน Sheet — รอ Admin อัปโหลดไฟล์")
+    st.info("ยังไม่มีข้อมูลใน Sheet — รออัปโหลดไฟล์")
     st.stop()
 
 # ===============================
@@ -429,9 +424,8 @@ if "completed_cases" not in st.session_state:
     st.session_state["completed_cases"] = set()
 
 # ===============================
-# MAIN CONTENT
+# MAIN CONTENT: Date title (no underline)
 # ===============================
-# Date title (no underline)
 if "opedate" in df_raw.columns:
     opedate_raw = pd.to_datetime(df_raw["opedate"].dropna().iloc[0], errors="coerce")
     if pd.notna(opedate_raw):
@@ -556,7 +550,6 @@ if not safe_cols:
     st.info("ไม่พบคอลัมน์ Operation/Proc note สำหรับแสดงรายการแบบไม่ระบุตัวบุคคล")
 else:
     df_list = df_raw.copy()
-
     if "estmtime" in df_list.columns:
         df_list = df_list.sort_values("estmtime")
 
@@ -639,14 +632,3 @@ else:
     else:
         st.caption("ใช้รายการนี้เพิ่ม ALIASES หรือ pattern ได้")
         df_show(unk_df, stretch=True)
-
-# ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
-SHEET_ID = st.secrets["SHEET_ID"]
-SHEET_NAME = st.secrets.get("SHEET_NAME", "Sheet1")
-creds = ServiceAccountCredentials.from_json_keyfile_dict(
-    st.secrets["gcp_service_account"],
-    scope
-)
-
-
-
