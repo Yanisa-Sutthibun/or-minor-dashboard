@@ -16,7 +16,7 @@ st.title("OR-minor Schedule Dashboard 📊")
 # ===============================
 try:
     PASSWORD = st.secrets["APP_PASSWORD"]  # ใช้รหัสจาก Secrets บน Cloud
-except:
+except Exception:
     PASSWORD = "pghnurse30"  # รหัส default สำหรับทดสอบในเครื่อง (เปลี่ยนได้)
 
 # สร้าง session state
@@ -27,7 +27,6 @@ if not st.session_state["authenticated"]:
     st.markdown("### 🔐 เข้าสู่ระบบ OR Dashboard")
     col1, col2 = st.columns([1, 2])
     with col2:
-        # ใช้ key คงที่เพื่อไม่ให้ widget เปลี่ยนทุก rerun
         password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="pw_input")
         if st.button("เข้าสู่ระบบ", key="login_btn"):
             if password_input == PASSWORD:
@@ -37,7 +36,23 @@ if not st.session_state["authenticated"]:
             else:
                 st.error("รหัสผ่านไม่ถูกต้อง")
     st.stop()
-# ถ้า authenticated = True → ไม่ถามอีกจนกว่าจะปิดเบราว์เซอร์หรือแท็บ
+
+# ===============================
+# ✅ TOP BAR: Manual Refresh (แทน F5)
+# ===============================
+top_c1, top_c2, top_c3 = st.columns([1.2, 6, 1.2])
+with top_c1:
+    if st.button("🔄 Refresh", key="btn_refresh"):
+        st.rerun()
+with top_c2:
+    st.caption("ℹ️ กดปุ่ม Refresh เพื่อ update")
+with top_c3:
+    if st.button("ออกจากระบบ", key="btn_logout"):
+        st.session_state["authenticated"] = False
+        st.rerun()
+
+st.divider()
+
 # ===============================
 # Helper: dataframe width compat
 # ===============================
@@ -326,8 +341,6 @@ else:
 # ===============================
 # MAIN CONTENT
 # ===============================
-st.divider()
-
 if df_raw is None:
     st.info("กรุณาอัปโหลดไฟล์จาก sidebar ด้านซ้ายก่อน")
     st.stop()
@@ -352,7 +365,6 @@ st.markdown("---")
 
 st.subheader("📊 OR-Minor Summary")
 
-# OR Summary Cards
 summary_df_temp, meta_temp, _ = build_daily_summary(df_raw, use_fuzzy=False, fuzzy_threshold=85)
 total_cases = meta_temp["cases_total"]
 category_counts = meta_temp["category_counts"]
@@ -505,7 +517,17 @@ st.markdown("---")
 
 # Daily case summary
 st.subheader("📈 Daily case summary (เช้า/บ่าย/TF)")
-summary_df, meta, df_work = build_daily_summary(df_raw, use_fuzzy=False, fuzzy_threshold=85)
+
+# ✅ ไม่ทำ st.rerun() วนลูป
+c1, c2, c3 = st.columns([1, 1, 2])
+with c1:
+    use_fuzzy = st.checkbox("เปิดใช้ Fuzzy Matching เมื่อเป็น Other", value=False)
+with c2:
+    fuzzy_threshold = st.slider("Fuzzy threshold", min_value=60, max_value=95, value=85, step=1)
+with c3:
+    st.caption("ถ้าไม่มี rapidfuzz จะ fallback เป็น rule-based อัตโนมัติ")
+
+summary_df, meta, df_work = build_daily_summary(df_raw, use_fuzzy=use_fuzzy, fuzzy_threshold=fuzzy_threshold)
 
 st.caption(
     f"proc col: {meta.get('proc_col_used') or '-'} | "
@@ -528,21 +550,6 @@ df_show(summary_df_display, stretch=True)
 
 st.markdown("---")
 
-# Operation
-st.subheader("⚙️ Operation")
-c1, c2, c3 = st.columns([1, 1, 2])
-with c1:
-    use_fuzzy = st.checkbox("เปิดใช้ Fuzzy Matching เมื่อเป็น Other", value=False)
-with c2:
-    fuzzy_threshold = st.slider("Fuzzy threshold", min_value=60, max_value=95, value=85, step=1)
-with c3:
-    st.caption("ถ้าไม่มี rapidfuzz จะ fallback เป็น rule-based อัตโนมัติ")
-
-if use_fuzzy:
-    summary_df, meta, df_work = build_daily_summary(df_raw, use_fuzzy=True, fuzzy_threshold=fuzzy_threshold)
-    summary_df_display = summary_df[display_cols]
-    st.rerun()
-
 # Other review
 st.subheader("🔍 Operation นอกเหนือที่ตั้งค่าไว้ (Other review)")
 proc_col_used = meta.get("proc_col_used")
@@ -558,7 +565,3 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
-
-
-
-
