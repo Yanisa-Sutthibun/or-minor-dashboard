@@ -307,6 +307,13 @@ def _require_sheet_config():
     if "gcp_service_account" not in st.secrets:
         st.error("ยังไม่ได้ตั้งค่า gcp_service_account ใน secrets")
         st.stop()
+    try:
+        ws = get_worksheet()
+        st.success("เชื่อมต่อ Google Sheet ได้แล้ว")
+    except Exception as e:
+        st.error("Google Sheet error:")
+        st.code(str(e))
+        st.stop()
 
 @st.cache_resource(ttl=300)
 def get_worksheet():
@@ -632,3 +639,4 @@ else:
     else:
         st.caption("ใช้รายการนี้เพิ่ม ALIASES หรือ pattern ได้")
         df_show(unk_df, stretch=True)
+
