@@ -572,14 +572,15 @@ else:
             c3.success("✓ เสร็จแล้ว")
         else:
             if c3.button("เสร็จแล้ว", key=f"done_safe_{i}"):
-                completed.add(i)
-                st.session_state["completed_cases"] = completed
+                mark_completed(upload_date_str, active_file_name, i)  # บันทึกลง DB จริง ๆ
+                st.session_state["completed_cases"].add(i)               # update session
                 st.rerun()
 
     col_reset1, col_reset2 = st.columns([6, 1.5])
     with col_reset2:
         if st.button("รีเซ็ตสถานะ", key="reset_completed_safe"):
-            st.session_state["completed_cases"] = set()
+            reset_completed_cases(upload_date_str, active_file_name)  # ลบจาก DB จริง ๆ
+            st.session_state["completed_cases"] = set()                # update session
             st.rerun()
 
 small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
@@ -633,3 +634,4 @@ else:
 # 🚫 ตัดส่วนดูข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
 small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 st.caption("Dashboard พร้อม SQLite แล้ว! ข้อมูล 'เสร็จแล้ว' จะถูกบันทึกถาวรในไฟล์ or_dashboard.db")
+
