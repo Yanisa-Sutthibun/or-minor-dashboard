@@ -4,7 +4,54 @@ import numpy as np
 import datetime as dt
 import re
 from io import BytesIO
+import sqlite3
+import os
+from datetime import datetime
+DB_PATH = "or_dashboard.db"
 
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS completed_cases (
+            upload_date TEXT,      -- วันที่อัปโหลด (YYYY-MM-DD)
+            file_name TEXT,        -- ชื่อไฟล์
+            case_index INTEGER,    -- ลำดับเคส (0,1,2,...)
+            completed_at TEXT,     -- เวลาที่กดเสร็จ
+            PRIMARY KEY (upload_date, file_name, case_index)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def load_completed_cases(upload_date: str, file_name: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT case_index FROM completed_cases WHERE upload_date=? AND file_name=?", (upload_date, file_name))
+    rows = c.fetchall()
+    conn.close()
+    return {row[0] for row in rows}
+
+def mark_completed(upload_date: str, file_name: str, case_index: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT OR IGNORE INTO completed_cases 
+        (upload_date, file_name, case_index, completed_at) 
+        VALUES (?, ?, ?, ?)
+    """, (upload_date, file_name, case_index, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+def reset_completed_cases(upload_date: str, file_name: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM completed_cases WHERE upload_date=? AND file_name=?", (upload_date, file_name))
+    conn.commit()
+    conn.close()
+
+# เริ่มต้นฐานข้อมูล
+init_db()
 # ===============================
 # 0) CONFIG
 # ===============================
@@ -341,23 +388,26 @@ except Exception as e:
     st.stop()
 
 # ===============================
-# UPLOAD TIME + COMPLETED STATE (reset เมื่อเปลี่ยนไฟล์)
+# UPLOAD TIME + COMPLETED STATE (เพิ่ม SQLite!)
 # ===============================
 if st.session_state.get("last_upload_name") != active_file_name:
     st.session_state["last_upload_name"] = active_file_name
     st.session_state["last_upload_ts"] = dt.datetime.now()
-    st.session_state["completed_cases"] = set()
 
-if "completed_cases" not in st.session_state:
-    st.session_state["completed_cases"] = set()
+if "last_upload_ts" not in st.session_state:
+    st.session_state["last_upload_ts"] = dt.datetime.now()
 
-upload_ts = st.session_state.get("last_upload_ts")
-if upload_ts:
-    year_th = upload_ts.year + 543
-    year_short = year_th % 100
-    upload_time_str = f"{upload_ts.day:02d}/{upload_ts.month:02d}/{year_short:02d} {upload_ts.strftime('%H:%M')}"
-else:
-    upload_time_str = "-"
+upload_ts = st.session_state["last_upload_ts"]
+upload_date_str = upload_ts.strftime("%Y-%m-%d")  # สำหรับ key ใน DB
+
+# โหลด completed cases จาก SQLite
+completed_set = load_completed_cases(upload_date_str, active_file_name)
+st.session_state["completed_cases"] = completed_set
+
+# แปลงเวลาเป็น พ.ศ.
+year_th = upload_ts.year + 543
+year_short = year_th % 100
+upload_time_str = f"{upload_ts.day:02d}/{upload_ts.month:02d}/{year_short:02d} {upload_ts.strftime('%H:%M')}"
 
 # ===============================
 # MAIN CONTENT: วันที่ผ่าตัด (opedate)
@@ -581,3 +631,5 @@ else:
         df_show(unk_df, stretch=True)
 
 # 🚫 ตัดส่วนดูข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
+st.caption("Dashboard พร้อม SQLite แล้ว! ข้อมูล 'เสร็จแล้ว' จะถูกบันทึกถาวรในไฟล์ or_dashboard.db")
