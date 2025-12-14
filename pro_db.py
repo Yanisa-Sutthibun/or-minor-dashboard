@@ -354,7 +354,21 @@ if "opedate" in df_raw.columns:
         month_names = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
                        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
         op_date_str = f"{day_op} {month_names[month_op]} {year_th_op}"
-        st.markdown(f"<h2 style='text-align: center; color: #1f77b4;'>📅 ตารางผ่าตัดวันที่ {op_date_str}</h2>", unsafe_allow_html=True)
+        st.markdown(
+    f"""
+    <div style="
+        text-align: center;
+        font-size: 26px;
+        font-weight: 600;
+        color: #1f77b4;
+        margin: 12px 0 4px 0;
+    ">
+        📅 ตารางผ่าตัดวันที่ {op_date_str}
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
     else:
         st.markdown("<h2 style='text-align: center;'>📅 ตารางผ่าตัด</h2>", unsafe_allow_html=True)
 else:
@@ -548,4 +562,5 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
+
 
