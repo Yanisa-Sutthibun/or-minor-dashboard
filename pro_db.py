@@ -14,7 +14,10 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-def small_divider(width_pct: int = 70, thickness_px: int = 2, color: str = "#eeeeee", margin_px: int = 12):
+# ===============================
+# Small divider (แทน st.divider / ---)
+# ===============================
+def small_divider(width_pct: int = 55, thickness_px: int = 2, color: str = "#e0e0e0", margin_px: int = 12):
     st.markdown(
         f"""
         <div style="
@@ -25,12 +28,6 @@ def small_divider(width_pct: int = 70, thickness_px: int = 2, color: str = "#eee
         """,
         unsafe_allow_html=True
     )
-
-def df_show(df, stretch: bool = True):
-    try:
-        return st.dataframe(df, width=("stretch" if stretch else "content"))
-    except TypeError:
-        return st.dataframe(df, use_container_width=stretch)
 
 # ===============================
 # PASSWORD PROTECTION
@@ -58,9 +55,9 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ===============================
-# TOP BAR
+# TOP BAR: Manual Refresh only
 # ===============================
-top_c1, top_c2, top_c3, top_c4 = st.columns([1.2, 6, 1.2, 1.6])
+top_c1, top_c2, top_c3 = st.columns([1.2, 6, 1.2])
 with top_c1:
     if st.button("🔄 Refresh", key="btn_refresh"):
         st.rerun()
@@ -70,14 +67,17 @@ with top_c3:
     if st.button("ออกจากระบบ", key="btn_logout"):
         st.session_state["authenticated"] = False
         st.rerun()
-with top_c4:
-    if st.button("🧹 ล้างข้อมูล", key="btn_clear_data"):
-        st.session_state.pop("df_raw", None)
-        st.session_state.pop("upload_time_str", None)
-        st.session_state["completed_cases"] = set()
-        st.rerun()
 
 small_divider(width_pct=70, thickness_px=2, color="#e6e6e6", margin_px=10)
+
+# ===============================
+# Helper: dataframe width compat
+# ===============================
+def df_show(df, stretch: bool = True):
+    try:
+        return st.dataframe(df, width=("stretch" if stretch else "content"))
+    except TypeError:
+        return st.dataframe(df, use_container_width=stretch)
 
 # ===============================
 # Shift labels
@@ -203,6 +203,7 @@ def classify_proc_category(proc_text: str, use_fuzzy: bool = False, threshold: i
         "Eyelid correction": ["ptosis correction", "eyelid correction"],
         "Facelift": ["facelift"],
     }
+
     all_choices = [(cat, term) for cat, terms in CANON.items() for term in terms]
     choices = [term for _, term in all_choices]
     best = process.extractOne(s, choices, scorer=fuzz.token_set_ratio)
@@ -240,11 +241,12 @@ def classify_shift(mins: float) -> str:
     return "AM" if mins < 12 * 60 else "PM"
 
 # ===============================
-# SUMMARY
+# BUILD SUMMARY
 # ===============================
 def build_daily_summary(df_raw_in: pd.DataFrame, use_fuzzy: bool, fuzzy_threshold: int):
-    df_work = df_raw_in.copy()
-    df_work.columns = [str(c).strip() for c in df_work.columns]
+    df = df_raw_in.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    df_work = df.copy()
 
     proc_col = pick_text_col(df_work, ["icd9cm_name", "operation", "opname", "procedure", "proc", "หัตถการ", "ผ่าตัด"])
     time_col = pick_text_col(df_work, ["estmtime", "reqtime", "opetime", "time", "เวลา", "เวลาผ่า", "เวลาเริ่ม"])
@@ -299,73 +301,66 @@ def top_unknowns(df_work: pd.DataFrame, proc_col: str, n=25) -> pd.DataFrame:
     vc.columns = ["normalized_proc", "count"]
     return vc
 
-def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
-    drop_exact = ["dspname", "surgstfnm", "surgeon", "anesthetist", "hn", "an", "patient", "name"]
-    safe = df.drop(columns=[c for c in drop_exact if c in df.columns], errors="ignore").copy()
-
-    pattern = re.compile(r"(name|ชื่อ|แพทย์|doctor|physician|surge|anesth|staff)", re.IGNORECASE)
-    extra_drop = [c for c in safe.columns if pattern.search(str(c))]
-    safe = safe.drop(columns=extra_drop, errors="ignore")
-
-    safe["__upload_ts__"] = dt.datetime.now().isoformat(timespec="seconds")
-    return safe
-
 # ===============================
-# SIDEBAR UPLOAD (SESSION)
+# SIDEBAR: UPLOAD (Refresh แล้วไฟล์ไม่หาย)
 # ===============================
 with st.sidebar:
     st.header("Upload file")
-    uploaded_file = st.file_uploader("อัปโหลดไฟล์ Excel (.xlsx หรือ .xls)", type=["xlsx", "xls"], key="uploader_local")
+    uploaded_file = st.file_uploader(
+        "อัปโหลดไฟล์ Excel (.xlsx หรือ .xls)",
+        type=["xlsx", "xls"],
+        key="uploader_main"
+    )
 
-    if uploaded_file is not None:
-        try:
-            file_name = uploaded_file.name.lower()
-            file_bytes = uploaded_file.getvalue()
-            file_stream = BytesIO(file_bytes)
+df_raw = None
 
-            if file_name.endswith(".xlsx"):
-                df_up = pd.read_excel(file_stream, engine="openpyxl")
-            elif file_name.endswith(".xls"):
-                df_up = pd.read_excel(file_stream, engine="xlrd")
-            else:
-                st.error("รองรับเฉพาะ .xlsx/.xls")
-                df_up = None
+if uploaded_file is not None:
+    st.session_state["uploaded_name"] = uploaded_file.name
+    st.session_state["uploaded_bytes"] = uploaded_file.getvalue()
 
-            if df_up is None or df_up.empty:
-                st.warning("ไฟล์ว่าง หรืออ่านไม่ได้")
-            else:
-                df_safe = sanitize_for_public_dashboard(df_up)
-                st.session_state["df_raw"] = df_safe
+active_file_name = st.session_state.get("uploaded_name")
+active_file_bytes = st.session_state.get("uploaded_bytes")
 
-                try:
-                    ts = pd.to_datetime(df_safe["__upload_ts__"].dropna().iloc[-1], errors="coerce")
-                    st.session_state["upload_time_str"] = ts.strftime("%d/%m/%y %H:%M") if pd.notna(ts) else "-"
-                except Exception:
-                    st.session_state["upload_time_str"] = "-"
-
-                st.success("อัปโหลดสำเร็จ (เก็บในหน้านี้เท่านั้น)")
-                st.rerun()
-
-        except Exception as e:
-            st.error("อัปโหลด/อ่านไฟล์ไม่สำเร็จ")
-            st.exception(e)
-
-# ===============================
-# LOAD DATA
-# ===============================
-df_raw = st.session_state.get("df_raw", None)
-upload_time_str = st.session_state.get("upload_time_str", "-")
-
-if df_raw is None or df_raw.empty:
-    st.info("ยังไม่มีข้อมูล — กรุณาอัปโหลดไฟล์ Excel ที่ sidebar")
+if active_file_bytes is None:
+    st.info("กรุณาอัปโหลดไฟล์จาก sidebar ด้านซ้ายก่อน")
     st.stop()
 
-# Completed state
+file_stream = BytesIO(active_file_bytes)
+file_name_lower = (active_file_name or "").lower()
+try:
+    if file_name_lower.endswith(".xlsx"):
+        df_raw = pd.read_excel(file_stream, engine="openpyxl")
+    elif file_name_lower.endswith(".xls"):
+        df_raw = pd.read_excel(file_stream, engine="xlrd")
+    else:
+        st.sidebar.error("รองรับเฉพาะไฟล์ .xlsx และ .xls เท่านั้น")
+        st.stop()
+except Exception as e:
+    st.sidebar.error(f"ไม่สามารถอ่านไฟล์ได้: {str(e)}")
+    st.sidebar.info("ลองบันทึกไฟล์ใหม่จาก Excel แล้วอัปโหลดอีกครั้ง")
+    st.stop()
+
+# ===============================
+# UPLOAD TIME + COMPLETED STATE (reset เมื่อเปลี่ยนไฟล์)
+# ===============================
+if st.session_state.get("last_upload_name") != active_file_name:
+    st.session_state["last_upload_name"] = active_file_name
+    st.session_state["last_upload_ts"] = dt.datetime.now()
+    st.session_state["completed_cases"] = set()
+
 if "completed_cases" not in st.session_state:
     st.session_state["completed_cases"] = set()
 
+upload_ts = st.session_state.get("last_upload_ts")
+if upload_ts:
+    year_th = upload_ts.year + 543
+    year_short = year_th % 100
+    upload_time_str = f"{upload_ts.day:02d}/{upload_ts.month:02d}/{year_short:02d} {upload_ts.strftime('%H:%M')}"
+else:
+    upload_time_str = "-"
+
 # ===============================
-# MAIN: Date title
+# MAIN CONTENT: วันที่ผ่าตัด (opedate)
 # ===============================
 if "opedate" in df_raw.columns:
     opedate_raw = pd.to_datetime(df_raw["opedate"].dropna().iloc[0], errors="coerce")
@@ -380,12 +375,12 @@ if "opedate" in df_raw.columns:
         st.markdown(
             f"""
             <div style="
-                text-align:center;
-                font-size:24px;
-                font-weight:700;
-                color:#1f77b4;
-                margin:10px 0 6px 0;
-                text-decoration:none;
+                text-align: center;
+                font-size: 24px;
+                font-weight: 600;
+                color: #1f77b4;
+                margin: 10px 0 4px 0;
+                text-decoration: none;
             ">
                 📅 ตารางผ่าตัดวันที่ {op_date_str}
             </div>
@@ -393,11 +388,13 @@ if "opedate" in df_raw.columns:
             unsafe_allow_html=True
         )
     else:
-        st.markdown("<div style='text-align:center; font-size:22px; font-weight:700; margin:10px 0;'>📅 ตารางผ่าตัด</div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>", unsafe_allow_html=True)
+        small_divider(width_pct=25, thickness_px=2, color="#eeeeee", margin_px=8)
 else:
-    st.markdown("<div style='text-align:center; font-size:22px; font-weight:700; margin:10px 0;'>📅 ตารางผ่าตัด</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>", unsafe_allow_html=True)
+    small_divider(width_pct=25, thickness_px=2, color="#eeeeee", margin_px=8)
 
-small_divider()
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # ===============================
 # OR SUMMARY
@@ -405,7 +402,7 @@ small_divider()
 st.subheader("📊 OR-Minor Summary")
 
 summary_df_temp, meta_temp, _ = build_daily_summary(df_raw, use_fuzzy=False, fuzzy_threshold=85)
-total_cases = meta_temp["cases_total"]
+total_cases = int(meta_temp["cases_total"])
 category_counts = meta_temp["category_counts"]
 
 top_categories = category_counts.sort_values(ascending=False).head(4)
@@ -413,16 +410,16 @@ display_cats = top_categories.index.tolist()
 
 cols = st.columns(5)
 with cols[0]:
-    st.markdown("<h4 style='text-align:center; color:black;'>Total</h4>", unsafe_allow_html=True)
-    st.markdown(f"<h2 style='text-align:center; color:black; margin-top:-10px;'>{total_cases}</h2>", unsafe_allow_html=True)
+    st.markdown("<h4 style='text-align: center; color: black;'>Total</h4>", unsafe_allow_html=True)
+    st.markdown(f"<h2 style='text-align: center; color: black; margin-top: -10px;'>{total_cases}</h2>", unsafe_allow_html=True)
 
 for i, cat in enumerate(display_cats):
     count = int(category_counts.get(cat, 0))
     with cols[i + 1]:
-        st.markdown(f"<h4 style='text-align:center; color:black;'>{cat}</h4>", unsafe_allow_html=True)
-        st.markdown(f"<h2 style='text-align:center; color:black; margin-top:-10px;'>{count}</h2>", unsafe_allow_html=True)
+        st.markdown(f"<h4 style='text-align: center; color: black;'>{cat}</h4>", unsafe_allow_html=True)
+        st.markdown(f"<h2 style='text-align: center; color: black; margin-top: -10px;'>{count}</h2>", unsafe_allow_html=True)
 
-small_divider()
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # ===============================
 # OPERATION ON-GOING
@@ -436,14 +433,14 @@ if proc_col:
 
     completed_by_category = {}
     for idx in st.session_state.get("completed_cases", set()):
-        if idx < len(df_tmp):
+        if 0 <= idx < len(df_tmp):
             cat = df_tmp.iloc[idx]["__proc_category__"]
             completed_by_category[cat] = completed_by_category.get(cat, 0) + 1
 
     ongoing_counts = {}
     for cat, total in category_counts.items():
-        completed = completed_by_category.get(cat, 0)
-        remaining = int(total) - int(completed)
+        completed = int(completed_by_category.get(cat, 0))
+        remaining = int(total) - completed
         if remaining > 0:
             ongoing_counts[cat] = remaining
 
@@ -452,34 +449,37 @@ if proc_col:
         ongoing_cols = st.columns(len(ongoing_cats) + 1)
 
         with ongoing_cols[0]:
-            st.markdown("<h4 style='text-align:center; color:#2e86de;'>On-going</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='text-align: center; color: #2e86de;'>On-going</h4>", unsafe_allow_html=True)
 
         for i, (cat, count) in enumerate(ongoing_cats):
             with ongoing_cols[i + 1]:
-                st.markdown(f"<h4 style='text-align:center; color:black;'>{cat}</h4>", unsafe_allow_html=True)
-                st.markdown(f"<h2 style='text-align:center; color:#e74c3c; margin-top:-10px;'>{count}</h2>", unsafe_allow_html=True)
+                st.markdown(f"<h4 style='text-align: center; color: black;'>{cat}</h4>", unsafe_allow_html=True)
+                st.markdown(f"<h2 style='text-align: center; color: #e74c3c; margin-top: -10px;'>{count}</h2>", unsafe_allow_html=True)
     else:
         st.success("🎉 ไม่มีเคสที่เหลือทำแล้ว")
 else:
     st.info("ไม่พบคอลัมน์หัตถการสำหรับคำนวณ On-going")
 
-# status row
+# เวลา + เหลือเคส ใต้ On-going
 current_time = dt.datetime.now()
-current_time_str = current_time.strftime("%d/%m/%y %H:%M:%S")
+year_th_cur = current_time.year + 543
+year_short_cur = year_th_cur % 100
+current_time_str = f"{current_time.day:02d}/{current_time.month:02d}/{year_short_cur:02d} {current_time.strftime('%H:%M:%S')}"
+
 remaining_cases = total_cases - len(st.session_state.get("completed_cases", set()))
 
 status_cols = st.columns(3)
 with status_cols[0]:
-    st.markdown(f"<p style='text-align:left; color:black; margin-top:20px;'><strong>⏰ เวลาปัจจุบัน:</strong> {current_time_str}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: left; color: black; margin-top: 20px;'><strong>⏰ เวลาปัจจุบัน:</strong> {current_time_str}</p>", unsafe_allow_html=True)
 with status_cols[1]:
-    st.markdown(f"<p style='text-align:center; color:#666666; margin-top:20px;'><strong>📤 อัปเดตล่าสุด:</strong> {upload_time_str}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #666666; margin-top: 20px;'><strong>📤 อัปโหลดเมื่อ:</strong> {upload_time_str}</p>", unsafe_allow_html=True)
 with status_cols[2]:
-    st.markdown(f"<p style='text-align:right; color:#d73a3a; font-weight:bold; margin-top:20px;'><strong>⏳ เหลือเคสที่ยังไม่เสร็จ:</strong> {remaining_cases} ราย</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: right; color: #d73a3a; font-weight: bold; margin-top: 20px;'><strong>⏳ เหลือเคสที่ยังไม่เสร็จ:</strong> {remaining_cases} ราย</p>", unsafe_allow_html=True)
 
-small_divider()
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # ===============================
-# ✅ รายการผ่าตัดวันนี้
+# ✅ รายการผ่าตัดวันนี้ (ไม่แสดงชื่อผู้ป่วย/ชื่อแพทย์) + ปุ่มเสร็จแล้ว
 # ===============================
 st.subheader("✅ รายการผ่าตัดวันนี้ (ไม่แสดงชื่อผู้ป่วย/ชื่อแพทย์)")
 
@@ -492,14 +492,15 @@ if "procnote" in df_raw.columns:
 if not safe_cols:
     st.info("ไม่พบคอลัมน์ Operation/Proc note สำหรับแสดงรายการแบบไม่ระบุตัวบุคคล")
 else:
-    df_list = df_raw.copy()
+    df_safe = df_raw.copy()
 
-    if "estmtime" in df_list.columns:
-        df_list["__est_sort__"] = df_list["estmtime"].apply(to_minutes_from_any)
-        df_list = df_list.sort_values(["__est_sort__"], na_position="last").drop(columns=["__est_sort__"], errors="ignore")
+    # เรียงตามเวลา ถ้ามี
+    if "estmtime" in df_safe.columns:
+        df_safe["__est_sort__"] = df_safe["estmtime"].apply(to_minutes_from_any)
+        df_safe = df_safe.sort_values("__est_sort__", na_position="last").drop(columns="__est_sort__", errors="ignore")
 
-    df_list = df_list[safe_cols].copy().reset_index(drop=True)
-    df_list.rename(columns={"icd9cm_name": "Operation", "procnote": "Proc note"}, inplace=True)
+    df_safe = df_safe[safe_cols].copy().reset_index(drop=True)
+    df_safe.rename(columns={"icd9cm_name": "Operation", "procnote": "Proc note"}, inplace=True)
 
     completed = st.session_state["completed_cases"]
 
@@ -509,29 +510,29 @@ else:
     header[2].markdown("**Proc note**")
     header[3].markdown("**สถานะ**")
 
-    for i, row in df_list.iterrows():
+    for i, row in df_safe.iterrows():
         c0, c1, c2, c3 = st.columns([0.6, 3.5, 4.5, 1.4])
         c0.write(i)
         c1.write(row.get("Operation", ""))
 
-        pn = row.get("Proc note", "")
-        c2.write("" if pd.isna(pn) else pn)
+        proc_note = row.get("Proc note", "")
+        c2.write("" if pd.isna(proc_note) else proc_note)
 
         if i in completed:
             c3.success("✓ เสร็จแล้ว")
         else:
-            if c3.button("เสร็จแล้ว", key=f"done_{i}"):
+            if c3.button("เสร็จแล้ว", key=f"done_safe_{i}"):
                 completed.add(i)
                 st.session_state["completed_cases"] = completed
                 st.rerun()
 
     col_reset1, col_reset2 = st.columns([6, 1.5])
     with col_reset2:
-        if st.button("รีเซ็ตสถานะ", key="reset_completed"):
+        if st.button("รีเซ็ตสถานะ", key="reset_completed_safe"):
             st.session_state["completed_cases"] = set()
             st.rerun()
 
-small_divider()
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # ===============================
 # Daily case summary
@@ -562,13 +563,12 @@ if not active_categories and "Other" in summary_df.columns:
 
 df_show(summary_df[display_cols], stretch=True)
 
-small_divider()
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # ===============================
-# Other review
+# Other review (ไม่โชว์ข้อมูลดิบ/ชื่อคน)
 # ===============================
 st.subheader("🔍 Operation นอกเหนือที่ตั้งค่าไว้ (Other review)")
-
 proc_col_used = meta.get("proc_col_used")
 if not proc_col_used:
     st.info("ไม่พบคอลัมน์หัตถการในไฟล์ จึงไม่สามารถทำ Other review ได้")
@@ -579,3 +579,5 @@ else:
     else:
         st.caption("ใช้รายการนี้เพิ่ม ALIASES หรือ pattern ได้")
         df_show(unk_df, stretch=True)
+
+# 🚫 ตัดส่วนดูข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
