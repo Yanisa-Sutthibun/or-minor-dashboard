@@ -42,27 +42,6 @@ try:
     PASSWORD = st.secrets["APP_PASSWORD"]
 except Exception:
     PASSWORD = "pghnurse30"
-
-# Admin upload password (แยกได้ ถ้าไม่ตั้ง จะใช้ PASSWORD เดียวกัน)
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", PASSWORD)
-
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-
-if not st.session_state["authenticated"]:
-    st.markdown("### 🔐 เข้าสู่ระบบ OR Dashboard")
-    col1, col2 = st.columns([1, 2])
-    with col2:
-        password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="pw_input")
-        if st.button("เข้าสู่ระบบ", key="login_btn"):
-            if password_input == PASSWORD:
-                st.session_state["authenticated"] = True
-                st.success("เข้าสู่ระบบสำเร็จ!")
-                st.rerun()
-            else:
-                st.error("รหัสผ่านไม่ถูกต้อง")
-    st.stop()
-
 # ===============================
 # TOP BAR
 # ===============================
@@ -668,5 +647,6 @@ creds = ServiceAccountCredentials.from_json_keyfile_dict(
     st.secrets["gcp_service_account"],
     scope
 )
+
 
 
