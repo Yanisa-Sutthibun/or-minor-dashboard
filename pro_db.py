@@ -7,6 +7,8 @@ from io import BytesIO
 import sqlite3
 import os
 from datetime import datetime
+
+SHARED_EXCEL_PATH = "shared_schedule.xlsx"  # ไฟล์ที่ทุกคนใช้ร่วมกัน
 DB_PATH = "or_dashboard.db"
 
 def init_db():
@@ -14,10 +16,10 @@ def init_db():
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS completed_cases (
-            upload_date TEXT,      -- วันที่อัปโหลด (YYYY-MM-DD)
-            file_name TEXT,        -- ชื่อไฟล์
-            case_index INTEGER,    -- ลำดับเคส (0,1,2,...)
-            completed_at TEXT,     -- เวลาที่กดเสร็จ
+            upload_date TEXT,
+            file_name TEXT,
+            case_index INTEGER,
+            completed_at TEXT,
             PRIMARY KEY (upload_date, file_name, case_index)
         )
     ''')
@@ -36,8 +38,8 @@ def mark_completed(upload_date: str, file_name: str, case_index: int):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-        INSERT OR IGNORE INTO completed_cases 
-        (upload_date, file_name, case_index, completed_at) 
+        INSERT OR IGNORE INTO completed_cases
+        (upload_date, file_name, case_index, completed_at)
         VALUES (?, ?, ?, ?)
     """, (upload_date, file_name, case_index, datetime.now().isoformat()))
     conn.commit()
@@ -49,32 +51,16 @@ def reset_completed_cases(upload_date: str, file_name: str):
     c.execute("DELETE FROM completed_cases WHERE upload_date=? AND file_name=?", (upload_date, file_name))
     conn.commit()
     conn.close()
-
 # เริ่มต้นฐานข้อมูล
 init_db()
 # ===============================
-# 0) CONFIG
+# CONFIG
 # ===============================
 st.set_page_config(page_title="OR-minor Schedule Dashboard", layout="wide")
-st.markdown(
-    "<h1 style='font-size:34px; margin-bottom: 0.2rem;'>OR-minor Schedule Dashboard 📊</h1>",
-    unsafe_allow_html=True
-)
+st.markdown("<h1 style='font-size:34px; margin-bottom: 0.2rem;'>OR-minor Schedule Dashboard 📊</h1>", unsafe_allow_html=True)
 
-# ===============================
-# Small divider (แทน st.divider / ---)
-# ===============================
 def small_divider(width_pct: int = 55, thickness_px: int = 2, color: str = "#e0e0e0", margin_px: int = 12):
-    st.markdown(
-        f"""
-        <div style="
-            width: {width_pct}%;
-            margin: {margin_px}px auto;
-            border-bottom: {thickness_px}px solid {color};
-        "></div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown(f"<div style='width: {width_pct}%; margin: {margin_px}px auto; border-bottom: {thickness_px}px solid {color};'></div>", unsafe_allow_html=True)
 
 # ===============================
 # PASSWORD PROTECTION
@@ -91,9 +77,9 @@ if not st.session_state["authenticated"]:
     st.markdown("### 🔐 เข้าสู่ระบบ OR Dashboard")
     col1, col2 = st.columns([1, 2])
     with col2:
-        password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="pw_input")
-        if st.button("เข้าสู่ระบบ", key="login_btn"):
-            if password_input == PASSWORD:
+        pw = st.text_input("กรุณาใส่รหัสผ่าน", type="password")
+        if st.button("เข้าสู่ระบบ"):
+            if pw == PASSWORD:
                 st.session_state["authenticated"] = True
                 st.success("เข้าสู่ระบบสำเร็จ!")
                 st.rerun()
@@ -102,21 +88,72 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ===============================
-# TOP BAR: Manual Refresh only
+# TOP BAR
 # ===============================
 top_c1, top_c2, top_c3 = st.columns([1.2, 6, 1.2])
 with top_c1:
-    if st.button("🔄 Refresh", key="btn_refresh"):
+    if st.button("🔄 Refresh"):
         st.rerun()
 with top_c2:
     st.caption("ℹ️ กด Refresh เพื่ออัปเดต")
 with top_c3:
-    if st.button("ออกจากระบบ", key="btn_logout"):
+    if st.button("ออกจากระบบ"):
         st.session_state["authenticated"] = False
         st.rerun()
+small_divider(70, 2, "#e6e6e6", 10)
 
-small_divider(width_pct=70, thickness_px=2, color="#e6e6e6", margin_px=10)
+# ===============================
+# SIDEBAR: SHARED UPLOAD (Admin only)
+# ===============================
+with st.sidebar:
+    st.header("Upload file (Admin only)")
 
+    if os.path.exists(SHARED_EXCEL_PATH):
+        stat = os.stat(SHARED_EXCEL_PATH)
+        ts = dt.datetime.fromtimestamp(stat.st_mtime)
+        year_th = ts.year + 543
+        time_str = ts.strftime(f"%d/%m/{year_th % 100} %H:%M")
+        st.success(f"📄 ใช้ไฟล์ล่าสุด: shared_schedule.xlsx\n\nอัปโหลดเมื่อ: {time_str}")
+        st.info("ทุกคนเห็นข้อมูลเดียวกันแล้ว")
+
+    uploaded_file = st.file_uploader(
+        "อัปโหลดไฟล์ Excel ใหม่ (.xlsx หรือ .xls)",
+        type=["xlsx", "xls"],
+        key="uploader"
+    )
+
+    if uploaded_file is not None:
+        with open(SHARED_EXCEL_PATH, "wb") as f:
+            f.write(uploaded_file.getvalue())
+        st.success(f"อัปโหลดสำเร็จ: {uploaded_file.name}")
+        st.rerun()
+
+# ===============================
+# อ่านไฟล์ shared
+# ===============================
+if not os.path.exists(SHARED_EXCEL_PATH):
+    st.info("🔒 รอ Admin อัปโหลดไฟล์ Excel ก่อนใช้งาน")
+    st.stop()
+
+try:
+    df_raw = pd.read_excel(SHARED_EXCEL_PATH)
+except Exception as e:
+    st.error(f"อ่านไฟล์ไม่ได้: {e}")
+    st.stop()
+
+# เวลาอัปโหลดไฟล์ (สำหรับ DB key)
+upload_ts = dt.datetime.fromtimestamp(os.stat(SHARED_EXCEL_PATH).st_mtime)
+upload_date_str = upload_ts.strftime("%Y-%m-%d")
+active_file_name = "shared_schedule.xlsx"
+
+# โหลด completed cases
+completed_set = load_completed_cases(upload_date_str, active_file_name)
+st.session_state["completed_cases"] = completed_set
+
+# แปลงเวลา พ.ศ.
+year_th = upload_ts.year + 543
+year_short = year_th % 100
+upload_time_str = f"{upload_ts.day:02d}/{upload_ts.month:02d}/{year_short:02d} {upload_ts.strftime('%H:%M')}"
 # ===============================
 # Helper: dataframe width compat
 # ===============================
@@ -347,18 +384,7 @@ def top_unknowns(df_work: pd.DataFrame, proc_col: str, n=25) -> pd.DataFrame:
     vc = unk["__norm__"].value_counts().head(n).reset_index()
     vc.columns = ["normalized_proc", "count"]
     return vc
-
-# ===============================
-# SIDEBAR: UPLOAD (Refresh แล้วไฟล์ไม่หาย)
-# ===============================
-with st.sidebar:
-    st.header("Upload file")
-    uploaded_file = st.file_uploader(
-        "อัปโหลดไฟล์ Excel (.xlsx หรือ .xls)",
-        type=["xlsx", "xls"],
-        key="uploader_main"
-    )
-
+    
 df_raw = None
 
 if uploaded_file is not None:
@@ -633,5 +659,24 @@ else:
 
 # 🚫 ตัดส่วนดูข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
 small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
-st.caption("Dashboard พร้อม SQLite แล้ว! ข้อมูล 'เสร็จแล้ว' จะถูกบันทึกถาวรในไฟล์ or_dashboard.db")
+# ในส่วนปุ่ม "เสร็จแล้ว" และ "รีเซ็ต" ใช้แบบนี้ (สำคัญ!)
+# (แทนที่ส่วนเดิม)
+        if i in completed:
+            c3.success("✓ เสร็จแล้ว")
+        else:
+            if c3.button("เสร็จแล้ว", key=f"done_safe_{i}"):
+                mark_completed(upload_date_str, active_file_name, i)
+                st.session_state["completed_cases"].add(i)
+                st.rerun()
+
+    with col_reset2:
+        if st.button("รีเซ็ตสถานะ", key="reset_completed_safe"):
+            reset_completed_cases(upload_date_str, active_file_name)
+            st.session_state["completed_cases"] = set()
+            st.rerun()
+
+# ส่วนท้าย
+small_divider(70, 2, "#eeeeee", 12)
+st.caption("Dashboard พร้อมใช้งานเต็มรูปแบบ! ไฟล์ Excel และสถานะเสร็จแล้วเป็น shared ทุกคนเห็นเหมือนกัน")
+
 
