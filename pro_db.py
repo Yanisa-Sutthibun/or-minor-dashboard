@@ -5,8 +5,7 @@ import datetime as dt
 import re
 from io import BytesIO
 import gspread
-from gspread_dataframe import set_with_dataframe, get_as_dataframe
-from oauth2client.service_account import ServiceAccountCredentials
+from gspread_pandas import Spread, Client
 
 # ===============================
 # 0) CONFIG
@@ -46,12 +45,9 @@ SHEET_ID = "1xseEQo0ZqGrVA00yn9Y4LZtCw3kEb2zTF6ao4IbjfyA"
 SHEET_NAME = "Sheet1"
 
 @st.cache_resource(ttl=60)
-def get_sheet():
-    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-    return sheet
+def get_spread():
+    spread = Spread(SHEET_ID, sheet=SHEET_NAME, config=st.secrets["gcp_service_account"])
+    return spread
 
 # ===============================
 # SIDEBAR: UPLOAD FILE (Admin only)
@@ -74,9 +70,8 @@ if uploaded_file is not None:
         st.sidebar.success("อัปโหลดและบันทึกข้อมูลสำเร็จ!")
         
         # บันทึกข้อมูลลง Google Sheet
-        sheet = get_sheet()
-        sheet.clear()
-        set_with_dataframe(sheet, df_raw)
+        spread = get_spread()
+        spread.df_to_sheet(df_raw, index=False, sheet=SHEET_NAME, replace=True)
     except Exception as e:
         st.sidebar.error(f"ไม่สามารถอ่านหรือบันทึกไฟล์ได้: {str(e)}")
         st.sidebar.info("ลองบันทึกไฟล์ใหม่จาก Excel แล้วอัปโหลดอีกครั้ง")
@@ -85,10 +80,9 @@ if uploaded_file is not None:
 # LOAD DATA FROM SHEET (ทุกเครื่องดึงจากที่นี่)
 # ===============================
 try:
-    sheet = get_sheet()
-    df_raw = get_as_dataframe(sheet)
-    df_raw = df_raw.dropna(how="all", axis=1)  # ล้างคอลัมน์ว่าง
-    df_raw = df_raw.dropna(how="all", axis=0)  # ล้างแถวว่าง
+    spread = get_spread()
+    df_raw = spread.sheet_to_df(index=None)
+    df_raw = df_raw.dropna(how="all")
     if df_raw.empty:
         st.info("ยังไม่มีข้อมูลใน Sheet — รอ Admin อัปโหลดไฟล์")
         st.stop()
@@ -98,15 +92,7 @@ except Exception as e:
     st.stop()
 
 # ===============================
-# UPLOAD TIME + COMPLETED STATE
-# ===============================
-# ไม่ต้องเก็บ upload time จากไฟล์แล้ว เพราะใช้ Sheet เป็นหลัก
-# แต่เก็บ completed_cases ไว้สำหรับกดเสร็จแล้ว
-if "completed_cases" not in st.session_state:
-    st.session_state["completed_cases"] = set()
-
-# ===============================
-# MAIN CONTENT
+# MAIN CONTENT (ส่วนที่เหลือเหมือนเดิมทั้งหมด)
 # ===============================
 st.divider()
 
