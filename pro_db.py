@@ -15,9 +15,9 @@ st.title("OR-minor Schedule Dashboard 📊")
 # PASSWORD PROTECTION (จำรหัสได้จนปิดเบราว์เซอร์)
 # ===============================
 try:
-    PASSWORD = st.secrets["APP_PASSWORD"]
+    PASSWORD = st.secrets["APP_PASSWORD"]  # ใช้รหัสจาก Secrets บน Cloud
 except:
-    PASSWORD = "pghnurse30"  # รหัส default สำหรับทดสอบในเครื่อง
+    PASSWORD = "pghnurse30"  # รหัส default สำหรับทดสอบในเครื่อง (เปลี่ยนได้)
 
 # สร้าง session state
 if "authenticated" not in st.session_state:
@@ -27,9 +27,9 @@ if not st.session_state["authenticated"]:
     st.markdown("### 🔐 เข้าสู่ระบบ OR Dashboard")
     col1, col2 = st.columns([1, 2])
     with col2:
-        # เพิ่ม key คงที่ เพื่อไม่ให้ widget เปลี่ยนทุก rerun
-        password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="password_fixed")
-        if st.button("เข้าสู่ระบบ", key="login_fixed"):
+        # ใช้ key คงที่เพื่อไม่ให้ widget เปลี่ยนทุก rerun
+        password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="pw_input")
+        if st.button("เข้าสู่ระบบ", key="login_btn"):
             if password_input == PASSWORD:
                 st.session_state["authenticated"] = True
                 st.success("เข้าสู่ระบบสำเร็จ! 🎉")
@@ -558,6 +558,7 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
+
 
 
 
