@@ -337,10 +337,9 @@ try:
     st.success("✅ เชื่อมต่อ Google Sheet ได้จริง")
     st.write("Sheet title:", ws.title)
 except Exception as e:
-    st.error("❌ เชื่อมต่อไม่ได้")
+    st.error("❌ เชื่อมต่อไม่ได้ (Google ปฏิเสธ)")
     st.code(str(e))
     st.stop()
-
 def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
     """
     ป้องกันข้อมูลหลุด: ตัดคอลัมน์ระบุตัวบุคคล ก่อนเขียนลง Sheet
@@ -665,4 +664,5 @@ else:
         df_show(unk_df, stretch=True)
 
 # ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
+
 
