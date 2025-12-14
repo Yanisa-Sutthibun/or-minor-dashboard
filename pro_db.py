@@ -663,12 +663,14 @@ small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 # (แทนที่ส่วนเดิม)
 if i in completed:
             c3.success("✓ เสร็จแล้ว")
-    else:
+        if i in completed:
+            c3.success("✓ เสร็จแล้ว")
+        else:
             if c3.button("เสร็จแล้ว", key=f"done_safe_{i}"):
                 mark_completed(upload_date_str, active_file_name, i)
                 st.session_state["completed_cases"].add(i)
                 st.rerun()
-col_reset1, col_reset2 = st.columns([6, 1.5])
+    col_reset1, col_reset2 = st.columns([6, 1.5])
     with col_reset2:
         if st.button("รีเซ็ตสถานะ", key="reset_completed_safe"):
             reset_completed_cases(upload_date_str, active_file_name)
@@ -678,6 +680,7 @@ col_reset1, col_reset2 = st.columns([6, 1.5])
 # ส่วนท้าย
 small_divider(70, 2, "#eeeeee", 12)
 st.caption("Dashboard พร้อมใช้งานเต็มรูปแบบ! ไฟล์ Excel และสถานะเสร็จแล้วเป็น shared ทุกคนเห็นเหมือนกัน")
+
 
 
 
