@@ -329,6 +329,17 @@ def get_worksheet():
     sh = gc.open_by_key(SHEET_ID)
     ws = sh.worksheet(SHEET_NAME)
     return ws
+# ===============================
+# TEST GOOGLE SHEET CONNECTION (ชั่วคราว)
+# ===============================
+try:
+    ws = get_worksheet()
+    st.success("✅ เชื่อมต่อ Google Sheet ได้จริง")
+    st.write("Sheet title:", ws.title)
+except Exception as e:
+    st.error("❌ เชื่อมต่อไม่ได้")
+    st.code(str(e))
+    st.stop()
 
 def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -654,3 +665,4 @@ else:
         df_show(unk_df, stretch=True)
 
 # ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
+
