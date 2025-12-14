@@ -478,70 +478,35 @@ with status_cols[2]:
 
 small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
-# รายการผ่าตัดวันนี้
-st.subheader("✅ รายการผ่าตัดวันนี้")
+# ===============================
+# ✅ รายการผ่าตัดวันนี้ (ซ่อนข้อมูลระบุตัวบุคคล)
+# ===============================
+st.subheader("✅ รายการผ่าตัดวันนี้ (ไม่แสดงชื่อผู้ป่วย/ชื่อแพทย์)")
 
-patient_cols = ["dspname", "icd9cm_name", "procnote", "surgstfnm"]
-available_cols = [col for col in patient_cols if col in df_raw.columns]
+# แสดงเฉพาะข้อมูลที่ไม่ระบุตัวบุคคล: Operation + Proc note (ถ้ามี)
+safe_cols = []
+if "icd9cm_name" in df_raw.columns:
+    safe_cols.append("icd9cm_name")
+if "procnote" in df_raw.columns:
+    safe_cols.append("procnote")
 
-if available_cols:
-    if "estmtime" in df_raw.columns:
-        df_sorted = df_raw.sort_values("estmtime")
-    else:
-        df_sorted = df_raw
+if safe_cols:
+    df_safe = df_raw.copy()
+    # เรียงตามเวลา ถ้ามี
+    if "estmtime" in df_safe.columns:
+        df_safe = df_safe.sort_values("estmtime")
 
-    df_patient = df_sorted[available_cols].copy().reset_index(drop=True)
+    df_safe = df_safe[safe_cols].copy().reset_index(drop=True)
 
     rename_map = {
-        "dspname": "ชื่อผู้ป่วย",
         "icd9cm_name": "Operation",
         "procnote": "Proc note",
-        "surgstfnm": "Staff"
     }
-    df_patient.rename(columns=rename_map, inplace=True)
+    df_safe.rename(columns=rename_map, inplace=True)
 
-    completed = st.session_state.get("completed_cases", set())
-    st.write("กดปุ่ม **เสร็จแล้ว** เมื่อทำเคสนั้นเสร็จ")
-
-    has_completed = False
-    for idx, row in df_patient.iterrows():
-        if idx in completed:
-            has_completed = True
-            continue
-
-        col1, col2, col3, col4, col5 = st.columns([3, 3, 3, 3, 1.5])
-        with col1:
-            st.write(row["ชื่อผู้ป่วย"])
-        with col2:
-            st.write(row["Operation"])
-        with col3:
-            st.write(row["Proc note"] if pd.notna(row["Proc note"]) else "")
-        with col4:
-            st.write(row["Staff"])
-        with col5:
-            if st.button("เสร็จแล้ว", key=f"done_{idx}"):
-                st.session_state["completed_cases"].add(idx)
-                st.rerun()
-
-    if has_completed:
-        small_divider(width_pct=60, thickness_px=1, color="#eeeeee", margin_px=10)
-        st.caption("**✅ เคสที่เสร็จแล้ว**")
-        for idx, row in df_patient.iterrows():
-            if idx not in completed:
-                continue
-            col1, col2, col3, col4, col5 = st.columns([3, 3, 3, 3, 1.5])
-            with col1:
-                st.write(row["ชื่อผู้ป่วย"])
-            with col2:
-                st.write(row["Operation"])
-            with col3:
-                st.write(row["Proc note"] if pd.notna(row["Proc note"]) else "")
-            with col4:
-                st.write(row["Staff"])
-            with col5:
-                st.success("✓ เสร็จแล้ว")
+    df_show(df_safe, stretch=True)
 else:
-    st.info("ไม่พบคอลัมน์ที่ต้องการสำหรับแสดงรายการผู้ป่วย")
+    st.info("ไม่พบคอลัมน์ Operation/Proc note สำหรับแสดงรายการแบบไม่ระบุตัวบุคคล")
 
 small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
@@ -573,7 +538,7 @@ df_show(summary_df[display_cols], stretch=True)
 
 small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
-# Other review
+# Other review (ไม่ระบุตัวบุคคล)
 st.subheader("🔍 Operation นอกเหนือที่ตั้งค่าไว้ (Other review)")
 proc_col_used = meta.get("proc_col_used")
 if not proc_col_used:
@@ -586,6 +551,8 @@ else:
         st.caption("ใช้รายการนี้เพิ่ม ALIASES หรือ pattern ได้")
         df_show(unk_df, stretch=True)
 
-with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
-    df_show(df_raw.head(50), stretch=True)
-
+# ===============================
+# 🚫 ลบส่วนดูข้อมูลดิบออก (ป้องกันข้อมูลหลุด)
+# ===============================
+# with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
+#     df_show(df_raw.head(50), stretch=True)
