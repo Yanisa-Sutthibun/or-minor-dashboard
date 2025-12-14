@@ -1,9 +1,39 @@
-           border-bottom: {thickness_px}px solid {color};
-       "></div>
-       """,
-unsafe_allow_html=True
+import streamlit as st
+import pandas as pd
+import numpy as np
+import datetime as dt
+import re
+from io import BytesIO
+
+# ===============================
+# 0) CONFIG
+# ===============================
+st.set_page_config(page_title="OR-minor Schedule Dashboard", layout="wide")
+st.markdown(
+    "<h1 style='font-size:34px; margin-bottom: 0.2rem;'>OR-minor Schedule Dashboard 📊</h1>",
+    unsafe_allow_html=True
 )
 
+# -------------------------------
+# Small divider
+# -------------------------------
+def small_divider(width_pct: int = 70, thickness_px: int = 2, color: str = "#eeeeee", margin_px: int = 12):
+    st.markdown(
+        f"""
+        <div style="
+            width: {width_pct}%;
+            margin: {margin_px}px auto;
+            border-bottom: {thickness_px}px solid {color};
+        "></div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def df_show(df, stretch: bool = True):
+    try:
+        return st.dataframe(df, width=("stretch" if stretch else "content"))
+    except TypeError:
+        return st.dataframe(df, use_container_width=stretch)
 # ===============================
 # PASSWORD PROTECTION
 # ===============================
@@ -262,3 +292,4 @@ df_show(unk_df, stretch=True)
 # with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
 #     df_show(df_raw.head(50), stretch=True)
 # ✅ ตัดส่วน “ดูข้อมูลดิบ (preview 50 แถวแรก)” ออกเพื่อป้องกันข้อมูลหลุด
+
