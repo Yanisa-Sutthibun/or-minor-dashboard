@@ -8,14 +8,6 @@ from io import BytesIO
 
 import gspread
 from google.oauth2.service_account import Credentials
-st.write("Has gcp_service_account:", "gcp_service_account" in st.secrets)
-
-if "gcp_service_account" in st.secrets:
-    sa = st.secrets["gcp_service_account"]
-    st.write("Keys:", sa.keys())
-    st.write("Has private_key:", "private_key" in sa)
-    if "private_key" in sa:
-        st.write("private_key starts with:", sa["private_key"][:30])
 
 # ===============================
 # 0) CONFIG
@@ -341,14 +333,27 @@ def get_worksheet():
 # ===============================
 # TEST GOOGLE SHEET CONNECTION (ชั่วคราว)
 # ===============================
+st.subheader("🔧 Google Sheet Connection Debug")
+
 try:
     ws = get_worksheet()
-    st.success("✅ เชื่อมต่อ Google Sheet ได้จริง")
-    st.write("Sheet title:", ws.title)
+    st.success("✅ Auth ผ่าน และเปิด Spreadsheet ได้")
+    st.write("Worksheet title:", ws.title)
+
+    # ลองอ่าน 3 แถวแรก
+    vals = ws.get_all_values()[:3]
+    st.write("Preview (first 3 rows):")
+    st.json(vals)
+
+    # ลองเขียน/อ่านกลับ (ทดสอบสิทธิ์แก้ไข)
+    ws.update("A1", [["PING"]])
+    st.success("✅ Write test ผ่าน (มีสิทธิ์แก้ไข)")
+
 except Exception as e:
-    st.error("❌ เชื่อมต่อไม่ได้ (Google ปฏิเสธ)")
+    st.error("❌ ต่อ Google Sheet ไม่ได้")
     st.code(str(e))
     st.stop()
+
 def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
     """
     ป้องกันข้อมูลหลุด: ตัดคอลัมน์ระบุตัวบุคคล ก่อนเขียนลง Sheet
@@ -673,6 +678,7 @@ else:
         df_show(unk_df, stretch=True)
 
 # ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
+
 
 
 
