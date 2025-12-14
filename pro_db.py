@@ -1,13 +1,9 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime as dt
 import re
 from io import BytesIO
-
-import gspread
-from google.oauth2.service_account import Credentials
 
 # ===============================
 # 0) CONFIG
@@ -40,7 +36,7 @@ def df_show(df, stretch: bool = True):
         return st.dataframe(df, use_container_width=stretch)
 
 # ===============================
-# PASSWORD PROTECTION (ผู้ใช้ทุกคนต้อง login ก่อนดู)
+# PASSWORD PROTECTION
 # ===============================
 try:
     PASSWORD = st.secrets["APP_PASSWORD"]
@@ -67,7 +63,7 @@ if not st.session_state["authenticated"]:
 # ===============================
 # TOP BAR
 # ===============================
-top_c1, top_c2, top_c3 = st.columns([1.2, 6, 1.2])
+top_c1, top_c2, top_c3, top_c4 = st.columns([1.2, 6, 1.2, 1.6])
 with top_c1:
     if st.button("🔄 Refresh", key="btn_refresh"):
         st.rerun()
@@ -76,6 +72,12 @@ with top_c2:
 with top_c3:
     if st.button("ออกจากระบบ", key="btn_logout"):
         st.session_state["authenticated"] = False
+        st.rerun()
+with top_c4:
+    if st.button("🧹 ล้างข้อมูล", key="btn_clear_data"):
+        st.session_state.pop("df_raw", None)
+        st.session_state.pop("upload_time_str", None)
+        st.session_state["completed_cases"] = set()
         st.rerun()
 
 small_divider(width_pct=70, thickness_px=2, color="#e6e6e6", margin_px=10)
@@ -301,63 +303,10 @@ def top_unknowns(df_work: pd.DataFrame, proc_col: str, n=25) -> pd.DataFrame:
     vc.columns = ["normalized_proc", "count"]
     return vc
 
-# ===============================
-# GOOGLE SHEET CONFIG
-# ===============================
-SHEET_ID = st.secrets.get("SHEET_ID", "")
-SHEET_NAME = st.secrets.get("SHEET_NAME", "Sheet1")
-
-def _require_sheet_config():
-    if not SHEET_ID:
-        st.error("ยังไม่ได้ตั้งค่า SHEET_ID ใน secrets")
-        st.stop()
-    if "gcp_service_account" not in st.secrets:
-        st.error("ยังไม่ได้ตั้งค่า gcp_service_account ใน secrets")
-        st.stop()
-
-@st.cache_resource(ttl=300)
-def get_worksheet():
-    _require_sheet_config()
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=scopes
-    )
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(SHEET_ID)
-    ws = sh.worksheet(SHEET_NAME)
-    return ws
-# ===============================
-# TEST GOOGLE SHEET CONNECTION (ชั่วคราว)
-# ===============================
-st.subheader("🔧 Google Sheet Connection Debug")
-
-try:
-    ws = get_worksheet()
-    st.success("✅ ต่อ Google Sheet ได้แล้ว")
-    st.write("Spreadsheet title:", ws.spreadsheet.title)
-    st.write("Worksheet title:", ws.title)
-except Exception as e:
-    st.error("❌ ต่อ Google Sheet ไม่ได้")
-    st.code(str(e))
-    st.stop()
-
-
 def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    ป้องกันข้อมูลหลุด: ตัดคอลัมน์ระบุตัวบุคคล ก่อนเขียนลง Sheet
-    """
-    drop_exact = [
-        "dspname", "surgstfnm", "surgeon", "anesthetist",
-        "hn", "an", "patient", "name"
-    ]
+    drop_exact = ["dspname", "surgstfnm", "surgeon", "anesthetist", "hn", "an", "patient", "name"]
     safe = df.drop(columns=[c for c in drop_exact if c in df.columns], errors="ignore").copy()
 
-    # ถ้ากลัวไฟล์มีคอลัมน์ชื่อคนแปลกๆ ให้ตัดตาม pattern เพิ่ม:
-    # (ถ้าคอลัมน์มีคำว่า name/ชื่อ/แพทย์/doctor ฯลฯ จะโดนตัด)
     pattern = re.compile(r"(name|ชื่อ|แพทย์|doctor|physician|surge|anesth|staff)", re.IGNORECASE)
     extra_drop = [c for c in safe.columns if pattern.search(str(c))]
     safe = safe.drop(columns=extra_drop, errors="ignore")
@@ -365,30 +314,12 @@ def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
     safe["__upload_ts__"] = dt.datetime.now().isoformat(timespec="seconds")
     return safe
 
-def write_df_to_sheet(ws, df: pd.DataFrame):
-    df2 = df.copy().replace({np.nan: ""})
-    values = [df2.columns.tolist()] + df2.astype(str).values.tolist()
-    ws.clear()
-    ws.update(values)
-
-@st.cache_data(ttl=60)
-def read_df_from_sheet() -> pd.DataFrame:
-    ws = get_worksheet()
-    values = ws.get_all_values()
-    if not values or len(values) < 2:
-        return pd.DataFrame()
-    header = values[0]
-    rows = values[1:]
-    df = pd.DataFrame(rows, columns=header)
-    df = df.replace({"": np.nan}).dropna(how="all")
-    return df
-
 # ===============================
-# SIDEBAR: UPLOAD (หลัง login แล้วอัปโหลดได้เลย ไม่มี admin password)
+# SIDEBAR: UPLOAD (LOCAL SESSION)
 # ===============================
 with st.sidebar:
     st.header("Upload file")
-    uploaded_file = st.file_uploader("อัปโหลดไฟล์ Excel (.xlsx หรือ .xls)", type=["xlsx", "xls"], key="uploader_admin")
+    uploaded_file = st.file_uploader("อัปโหลดไฟล์ Excel (.xlsx หรือ .xls)", type=["xlsx", "xls"], key="uploader_local")
 
     if uploaded_file is not None:
         try:
@@ -408,43 +339,31 @@ with st.sidebar:
                 st.warning("ไฟล์ว่าง หรืออ่านไม่ได้")
             else:
                 df_safe = sanitize_for_public_dashboard(df_up)
-                ws = get_worksheet()
-                write_df_to_sheet(ws, df_safe)
-                st.success("อัปโหลดสำเร็จ และบันทึกลง Google Sheet แล้ว")
-                st.cache_data.clear()
+                st.session_state["df_raw"] = df_safe
+
+                # upload time สำหรับโชว์ด้านบน
+                try:
+                    ts = pd.to_datetime(df_safe["__upload_ts__"].dropna().iloc[-1], errors="coerce")
+                    st.session_state["upload_time_str"] = ts.strftime("%d/%m/%y %H:%M") if pd.notna(ts) else "-"
+                except Exception:
+                    st.session_state["upload_time_str"] = "-"
+
+                st.success("อัปโหลดสำเร็จ (เก็บในหน้านี้เท่านั้น)")
                 st.rerun()
 
         except Exception as e:
-            st.error("อัปโหลด/บันทึกไม่สำเร็จ")
-            st.code(str(e))
-            st.caption("เช็ก 2 อย่าง: 1) แชร์ Sheet ให้ service account 2) เปิด API Sheets/Drive ใน Google Cloud")
+            st.error("อัปโหลด/อ่านไฟล์ไม่สำเร็จ")
+            st.exception(e)
 
 # ===============================
-# LOAD DATA FROM SHEET (ทุกเครื่องดึงจากที่นี่)
+# LOAD DATA (FROM SESSION)
 # ===============================
-try:
-    df_raw = read_df_from_sheet()
-except Exception as e:
-    st.error("ไม่สามารถเชื่อมต่อ Google Sheet ได้")
-    st.code(str(e))
-    st.info("ให้เช็ก: secrets และแชร์ Sheet ให้ service account email")
-    st.stop()
+df_raw = st.session_state.get("df_raw", None)
+upload_time_str = st.session_state.get("upload_time_str", "-")
 
 if df_raw is None or df_raw.empty:
-    st.info("ยังไม่มีข้อมูลใน Sheet — รออัปโหลดไฟล์")
+    st.info("ยังไม่มีข้อมูล — กรุณาอัปโหลดไฟล์ Excel ที่ sidebar")
     st.stop()
-
-# ===============================
-# UPLOAD TIME (อ่านจาก __upload_ts__)
-# ===============================
-upload_time_str = "-"
-if "__upload_ts__" in df_raw.columns:
-    try:
-        ts = pd.to_datetime(df_raw["__upload_ts__"].dropna().iloc[-1], errors="coerce")
-        if pd.notna(ts):
-            upload_time_str = ts.strftime("%d/%m/%y %H:%M")
-    except Exception:
-        pass
 
 # ===============================
 # Completed state (ต่อเครื่อง/ต่อ session)
@@ -453,7 +372,7 @@ if "completed_cases" not in st.session_state:
     st.session_state["completed_cases"] = set()
 
 # ===============================
-# MAIN: Date title (ไม่มีเส้นใต้ฟ้า)
+# MAIN: Date title
 # ===============================
 if "opedate" in df_raw.columns:
     opedate_raw = pd.to_datetime(df_raw["opedate"].dropna().iloc[0], errors="coerce")
@@ -567,7 +486,7 @@ with status_cols[2]:
 small_divider()
 
 # ===============================
-# ✅ รายการผ่าตัดวันนี้ (ไม่แสดงชื่อผู้ป่วย/ชื่อแพทย์) + ปุ่มเสร็จแล้ว
+# ✅ รายการผ่าตัดวันนี้ + ปุ่มเสร็จแล้ว
 # ===============================
 st.subheader("✅ รายการผ่าตัดวันนี้ (ไม่แสดงชื่อผู้ป่วย/ชื่อแพทย์)")
 
@@ -583,7 +502,6 @@ else:
     df_list = df_raw.copy()
 
     if "estmtime" in df_list.columns:
-        # sort แบบทน: ถ้าเป็น string ก็ยัง sort ได้
         df_list["__est_sort__"] = df_list["estmtime"].apply(to_minutes_from_any)
         df_list = df_list.sort_values(["__est_sort__"], na_position="last").drop(columns=["__est_sort__"], errors="ignore")
 
@@ -670,9 +588,4 @@ else:
         df_show(unk_df, stretch=True)
 
 # ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
-
-
-
-
-
 
