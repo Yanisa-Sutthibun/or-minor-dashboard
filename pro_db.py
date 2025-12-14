@@ -17,6 +17,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# -------------------------------
+# Small divider
+# -------------------------------
 def small_divider(width_pct: int = 70, thickness_px: int = 2, color: str = "#eeeeee", margin_px: int = 12):
     st.markdown(
         f"""
@@ -36,21 +39,25 @@ def df_show(df, stretch: bool = True):
         return st.dataframe(df, use_container_width=stretch)
 
 # ===============================
-# PASSWORD PROTECTION (viewer login)
+# PASSWORD PROTECTION (ผู้ใช้ทุกคนต้อง login ก่อนดู)
 # ===============================
-PASSWORD = st.secrets.get("APP_PASSWORD", "pghnurse30")
+try:
+    PASSWORD = st.secrets["APP_PASSWORD"]
+except Exception:
+    PASSWORD = "pghnurse30"  # fallback
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
     st.markdown("### 🔐 เข้าสู่ระบบ OR Dashboard")
-    c1, c2 = st.columns([1, 2])
-    with c2:
-        pw = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="pw_input")
+    col1, col2 = st.columns([1, 2])
+    with col2:
+        password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password", key="pw_input")
         if st.button("เข้าสู่ระบบ", key="login_btn"):
-            if pw == PASSWORD:
+            if password_input == PASSWORD:
                 st.session_state["authenticated"] = True
+                st.success("เข้าสู่ระบบสำเร็จ!")
                 st.rerun()
             else:
                 st.error("รหัสผ่านไม่ถูกต้อง")
@@ -70,7 +77,7 @@ with top_c3:
         st.session_state["authenticated"] = False
         st.rerun()
 
-small_divider()
+small_divider(width_pct=70, thickness_px=2, color="#e6e6e6", margin_px=10)
 
 # ===============================
 # Shift labels
@@ -196,7 +203,6 @@ def classify_proc_category(proc_text: str, use_fuzzy: bool = False, threshold: i
         "Eyelid correction": ["ptosis correction", "eyelid correction"],
         "Facelift": ["facelift"],
     }
-
     all_choices = [(cat, term) for cat, terms in CANON.items() for term in terms]
     choices = [term for _, term in all_choices]
     best = process.extractOne(s, choices, scorer=fuzz.token_set_ratio)
@@ -324,31 +330,54 @@ def get_worksheet():
     ws = sh.worksheet(SHEET_NAME)
     return ws
 
-def test_google_sheet_connection():
-    try:
-        _ = get_worksheet()
-        st.success("เชื่อมต่อ Google Sheet ได้แล้ว")
-    except Exception as e:
-        st.error("Google Sheet error:")
-        st.code(str(e))
-        st.stop()
+def sanitize_for_public_dashboard(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ป้องกันข้อมูลหลุด: ตัดคอลัมน์ระบุตัวบุคคล ก่อนเขียนลง Sheet
+    """
+    drop_exact = [
+        "dspname", "surgstfnm", "surgeon", "anesthetist",
+        "hn", "an", "patient", "name"
+    ]
+    safe = df.drop(columns=[c for c in drop_exact if c in df.columns], errors="ignore").copy()
 
+    # ถ้ากลัวไฟล์มีคอลัมน์ชื่อคนแปลกๆ ให้ตัดตาม pattern เพิ่ม:
+    # (ถ้าคอลัมน์มีคำว่า name/ชื่อ/แพทย์/doctor ฯลฯ จะโดนตัด)
+    pattern = re.compile(r"(name|ชื่อ|แพทย์|doctor|physician|surge|anesth|staff)", re.IGNORECASE)
+    extra_drop = [c for c in safe.columns if pattern.search(str(c))]
+    safe = safe.drop(columns=extra_drop, errors="ignore")
+
+    safe["__upload_ts__"] = dt.datetime.now().isoformat(timespec="seconds")
+    return safe
+
+def write_df_to_sheet(ws, df: pd.DataFrame):
+    df2 = df.copy().replace({np.nan: ""})
+    values = [df2.columns.tolist()] + df2.astype(str).values.tolist()
+    ws.clear()
+    ws.update(values)
+
+@st.cache_data(ttl=60)
+def read_df_from_sheet() -> pd.DataFrame:
+    ws = get_worksheet()
+    values = ws.get_all_values()
+    if not values or len(values) < 2:
+        return pd.DataFrame()
+    header = values[0]
+    rows = values[1:]
+    df = pd.DataFrame(rows, columns=header)
+    df = df.replace({"": np.nan}).dropna(how="all")
+    return df
 
 # ===============================
-# SIDEBAR: UPLOAD (ไม่มี admin password แล้ว)
+# SIDEBAR: UPLOAD (หลัง login แล้วอัปโหลดได้เลย ไม่มี admin password)
 # ===============================
 with st.sidebar:
     st.header("Upload file")
-    uploaded_file = st.file_uploader(
-        "อัปโหลดไฟล์ Excel (.xlsx หรือ .xls)",
-        type=["xlsx", "xls"],
-        key="uploader_admin"
-    )
+    uploaded_file = st.file_uploader("อัปโหลดไฟล์ Excel (.xlsx หรือ .xls)", type=["xlsx", "xls"], key="uploader_admin")
 
     if uploaded_file is not None:
         try:
             file_name = uploaded_file.name.lower()
-            file_bytes = uploaded_file.read()
+            file_bytes = uploaded_file.getvalue()
             file_stream = BytesIO(file_bytes)
 
             if file_name.endswith(".xlsx"):
@@ -359,19 +388,20 @@ with st.sidebar:
                 st.error("รองรับเฉพาะ .xlsx/.xls")
                 df_up = None
 
-            if df_up is not None and not df_up.empty:
+            if df_up is None or df_up.empty:
+                st.warning("ไฟล์ว่าง หรืออ่านไม่ได้")
+            else:
                 df_safe = sanitize_for_public_dashboard(df_up)
                 ws = get_worksheet()
                 write_df_to_sheet(ws, df_safe)
                 st.success("อัปโหลดสำเร็จ และบันทึกลง Google Sheet แล้ว")
                 st.cache_data.clear()
                 st.rerun()
-            else:
-                st.warning("ไฟล์ว่าง หรืออ่านไม่ได้")
+
         except Exception as e:
             st.error("อัปโหลด/บันทึกไม่สำเร็จ")
-            st.caption(str(e))
-            st.caption("เช็ก: secrets + แชร์ Sheet ให้ service account (Editor)")
+            st.code(str(e))
+            st.caption("เช็ก 2 อย่าง: 1) แชร์ Sheet ให้ service account 2) เปิด API Sheets/Drive ใน Google Cloud")
 
 # ===============================
 # LOAD DATA FROM SHEET (ทุกเครื่องดึงจากที่นี่)
@@ -380,8 +410,8 @@ try:
     df_raw = read_df_from_sheet()
 except Exception as e:
     st.error("ไม่สามารถเชื่อมต่อ Google Sheet ได้")
-    st.caption(str(e))
-    st.info("เช็ก: 1) แชร์ Sheet ให้ service account 2) สร้าง key ใหม่ 3) secrets ถูกต้อง")
+    st.code(str(e))
+    st.info("ให้เช็ก: secrets และแชร์ Sheet ให้ service account email")
     st.stop()
 
 if df_raw is None or df_raw.empty:
@@ -401,13 +431,13 @@ if "__upload_ts__" in df_raw.columns:
         pass
 
 # ===============================
-# Completed state (per viewer session)
+# Completed state (ต่อเครื่อง/ต่อ session)
 # ===============================
 if "completed_cases" not in st.session_state:
     st.session_state["completed_cases"] = set()
 
 # ===============================
-# MAIN CONTENT: Date title (no underline)
+# MAIN: Date title (ไม่มีเส้นใต้ฟ้า)
 # ===============================
 if "opedate" in df_raw.columns:
     opedate_raw = pd.to_datetime(df_raw["opedate"].dropna().iloc[0], errors="coerce")
@@ -418,14 +448,15 @@ if "opedate" in df_raw.columns:
         month_names = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
                        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
         op_date_str = f"{day_op} {month_names[month_op]} {year_th_op}"
+
         st.markdown(
             f"""
             <div style="
                 text-align:center;
-                font-size:26px;
+                font-size:24px;
                 font-weight:700;
                 color:#1f77b4;
-                margin:10px 0 4px 0;
+                margin:10px 0 6px 0;
                 text-decoration:none;
             ">
                 📅 ตารางผ่าตัดวันที่ {op_date_str}
@@ -444,6 +475,7 @@ small_divider()
 # OR SUMMARY
 # ===============================
 st.subheader("📊 OR-Minor Summary")
+
 summary_df_temp, meta_temp, _ = build_daily_summary(df_raw, use_fuzzy=False, fuzzy_threshold=85)
 total_cases = meta_temp["cases_total"]
 category_counts = meta_temp["category_counts"]
@@ -468,8 +500,8 @@ small_divider()
 # OPERATION ON-GOING
 # ===============================
 st.subheader("⏳ Operation On-going")
-proc_col = pick_text_col(df_raw, ["icd9cm_name", "operation", "opname", "procedure", "proc", "หัตถการ", "ผ่าตัด"])
 
+proc_col = pick_text_col(df_raw, ["icd9cm_name", "operation", "opname", "procedure", "proc", "หัตถการ", "ผ่าตัด"])
 if proc_col:
     df_tmp = df_raw.copy()
     df_tmp["__proc_category__"] = df_tmp[proc_col].apply(classify_proc_category_rules)
@@ -533,8 +565,11 @@ if not safe_cols:
     st.info("ไม่พบคอลัมน์ Operation/Proc note สำหรับแสดงรายการแบบไม่ระบุตัวบุคคล")
 else:
     df_list = df_raw.copy()
+
     if "estmtime" in df_list.columns:
-        df_list = df_list.sort_values("estmtime")
+        # sort แบบทน: ถ้าเป็น string ก็ยัง sort ได้
+        df_list["__est_sort__"] = df_list["estmtime"].apply(to_minutes_from_any)
+        df_list = df_list.sort_values(["__est_sort__"], na_position="last").drop(columns=["__est_sort__"], errors="ignore")
 
     df_list = df_list[safe_cols].copy().reset_index(drop=True)
     df_list.rename(columns={"icd9cm_name": "Operation", "procnote": "Proc note"}, inplace=True)
@@ -575,6 +610,7 @@ small_divider()
 # Daily case summary
 # ===============================
 st.subheader("📈 Daily case summary (เช้า/บ่าย/TF)")
+
 c1, c2, c3 = st.columns([1, 1, 2])
 with c1:
     use_fuzzy = st.checkbox("เปิดใช้ Fuzzy Matching เมื่อเป็น Other", value=False)
@@ -605,6 +641,7 @@ small_divider()
 # Other review (ไม่โชว์ข้อมูลดิบ)
 # ===============================
 st.subheader("🔍 Operation นอกเหนือที่ตั้งค่าไว้ (Other review)")
+
 proc_col_used = meta.get("proc_col_used")
 if not proc_col_used:
     st.info("ไม่พบคอลัมน์หัตถการในไฟล์ จึงไม่สามารถทำ Other review ได้")
@@ -616,5 +653,4 @@ else:
         st.caption("ใช้รายการนี้เพิ่ม ALIASES หรือ pattern ได้")
         df_show(unk_df, stretch=True)
 
-test_google_sheet_connection()
-df_raw = read_df_from_sheet()
+# ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
