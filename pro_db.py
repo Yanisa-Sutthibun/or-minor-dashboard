@@ -3,11 +3,13 @@ import pandas as pd
 import numpy as np
 import datetime as dt
 import re
-from io import BytesIO
 import sqlite3
 import os
 from datetime import datetime
 
+# ===============================
+# SHARED EXCEL + SQLITE SETUP
+# ===============================
 SHARED_EXCEL_PATH = "shared_schedule.xlsx"  # ไฟล์ที่ทุกคนใช้ร่วมกัน
 DB_PATH = "or_dashboard.db"
 
@@ -51,8 +53,9 @@ def reset_completed_cases(upload_date: str, file_name: str):
     c.execute("DELETE FROM completed_cases WHERE upload_date=? AND file_name=?", (upload_date, file_name))
     conn.commit()
     conn.close()
-# เริ่มต้นฐานข้อมูล
+
 init_db()
+
 # ===============================
 # CONFIG
 # ===============================
@@ -107,7 +110,6 @@ small_divider(70, 2, "#e6e6e6", 10)
 # ===============================
 with st.sidebar:
     st.header("Upload file (Admin only)")
-
     if os.path.exists(SHARED_EXCEL_PATH):
         stat = os.stat(SHARED_EXCEL_PATH)
         ts = dt.datetime.fromtimestamp(stat.st_mtime)
@@ -115,13 +117,11 @@ with st.sidebar:
         time_str = ts.strftime(f"%d/%m/{year_th % 100} %H:%M")
         st.success(f"📄 ใช้ไฟล์ล่าสุด: shared_schedule.xlsx\n\nอัปโหลดเมื่อ: {time_str}")
         st.info("ทุกคนเห็นข้อมูลเดียวกันแล้ว")
-
     uploaded_file = st.file_uploader(
         "อัปโหลดไฟล์ Excel ใหม่ (.xlsx หรือ .xls)",
         type=["xlsx", "xls"],
         key="uploader"
     )
-
     if uploaded_file is not None:
         with open(SHARED_EXCEL_PATH, "wb") as f:
             f.write(uploaded_file.getvalue())
@@ -154,6 +154,7 @@ st.session_state["completed_cases"] = completed_set
 year_th = upload_ts.year + 543
 year_short = year_th % 100
 upload_time_str = f"{upload_ts.day:02d}/{upload_ts.month:02d}/{year_short:02d} {upload_ts.strftime('%H:%M')}"
+
 # ===============================
 # Helper: dataframe width compat
 # ===============================
@@ -267,11 +268,9 @@ def classify_proc_category(proc_text: str, use_fuzzy: bool = False, threshold: i
         from rapidfuzz import process, fuzz
     except Exception:
         return base
-
     s = normalize_proc_text(proc_text)
     if not s:
         return "Other"
-
     CANON = {
         "I+D": ["i+d", "incision drainage"],
         "Excision": ["excision"],
@@ -287,7 +286,6 @@ def classify_proc_category(proc_text: str, use_fuzzy: bool = False, threshold: i
         "Eyelid correction": ["ptosis correction", "eyelid correction"],
         "Facelift": ["facelift"],
     }
-
     all_choices = [(cat, term) for cat, terms in CANON.items() for term in terms]
     choices = [term for _, term in all_choices]
     best = process.extractOne(s, choices, scorer=fuzz.token_set_ratio)
@@ -331,41 +329,32 @@ def build_daily_summary(df_raw_in: pd.DataFrame, use_fuzzy: bool, fuzzy_threshol
     df = df_raw_in.copy()
     df.columns = [str(c).strip() for c in df.columns]
     df_work = df.copy()
-
     proc_col = pick_text_col(df_work, ["icd9cm_name", "operation", "opname", "procedure", "proc", "หัตถการ", "ผ่าตัด"])
     time_col = pick_text_col(df_work, ["estmtime", "reqtime", "opetime", "time", "เวลา", "เวลาผ่า", "เวลาเริ่ม"])
-
     if proc_col is None:
         df_work["__proc_category__"] = "Other"
     else:
         df_work["__proc_category__"] = df_work[proc_col].apply(
             lambda v: classify_proc_category(v, use_fuzzy=use_fuzzy, threshold=fuzzy_threshold)
         )
-
     if time_col is None:
         df_work["__shift__"] = "Unknown"
     else:
         df_work["__mins__"] = df_work[time_col].apply(to_minutes_from_any)
         df_work["__shift__"] = df_work["__mins__"].apply(classify_shift)
-
     category_counts = df_work["__proc_category__"].value_counts()
     category_counts = category_counts[category_counts.index != "Other"]
-
     g = df_work.groupby(["__shift__", "__proc_category__"]).size().reset_index(name="n")
     pivot = g.pivot(index="__shift__", columns="__proc_category__", values="n").fillna(0).astype(int)
-
     for col in PROC_CATEGORIES:
         if col not in pivot.columns:
             pivot[col] = 0
     pivot["Total"] = pivot.sum(axis=1)
-
     for sh in SHIFT_ORDER:
         if sh not in pivot.index:
             pivot.loc[sh] = 0
-
     pivot = pivot.loc[SHIFT_ORDER].reset_index().rename(columns={"__shift__": "Shift"})
     pivot["Shift"] = pivot["Shift"].map(SHIFT_LABEL_MAP)
-
     meta = {
         "proc_col_used": proc_col,
         "time_col_used": time_col,
@@ -384,56 +373,6 @@ def top_unknowns(df_work: pd.DataFrame, proc_col: str, n=25) -> pd.DataFrame:
     vc = unk["__norm__"].value_counts().head(n).reset_index()
     vc.columns = ["normalized_proc", "count"]
     return vc
-    
-df_raw = None
-
-if uploaded_file is not None:
-    st.session_state["uploaded_name"] = uploaded_file.name
-    st.session_state["uploaded_bytes"] = uploaded_file.getvalue()
-
-active_file_name = st.session_state.get("uploaded_name")
-active_file_bytes = st.session_state.get("uploaded_bytes")
-
-if active_file_bytes is None:
-    st.info("กรุณาอัปโหลดไฟล์จาก sidebar ด้านซ้ายก่อน")
-    st.stop()
-
-file_stream = BytesIO(active_file_bytes)
-file_name_lower = (active_file_name or "").lower()
-try:
-    if file_name_lower.endswith(".xlsx"):
-        df_raw = pd.read_excel(file_stream, engine="openpyxl")
-    elif file_name_lower.endswith(".xls"):
-        df_raw = pd.read_excel(file_stream, engine="xlrd")
-    else:
-        st.sidebar.error("รองรับเฉพาะไฟล์ .xlsx และ .xls เท่านั้น")
-        st.stop()
-except Exception as e:
-    st.sidebar.error(f"ไม่สามารถอ่านไฟล์ได้: {str(e)}")
-    st.sidebar.info("ลองบันทึกไฟล์ใหม่จาก Excel แล้วอัปโหลดอีกครั้ง")
-    st.stop()
-
-# ===============================
-# UPLOAD TIME + COMPLETED STATE (เพิ่ม SQLite!)
-# ===============================
-if st.session_state.get("last_upload_name") != active_file_name:
-    st.session_state["last_upload_name"] = active_file_name
-    st.session_state["last_upload_ts"] = dt.datetime.now()
-
-if "last_upload_ts" not in st.session_state:
-    st.session_state["last_upload_ts"] = dt.datetime.now()
-
-upload_ts = st.session_state["last_upload_ts"]
-upload_date_str = upload_ts.strftime("%Y-%m-%d")  # สำหรับ key ใน DB
-
-# โหลด completed cases จาก SQLite
-completed_set = load_completed_cases(upload_date_str, active_file_name)
-st.session_state["completed_cases"] = completed_set
-
-# แปลงเวลาเป็น พ.ศ.
-year_th = upload_ts.year + 543
-year_short = year_th % 100
-upload_time_str = f"{upload_ts.day:02d}/{upload_ts.month:02d}/{year_short:02d} {upload_ts.strftime('%H:%M')}"
 
 # ===============================
 # MAIN CONTENT: วันที่ผ่าตัด (opedate)
@@ -447,7 +386,6 @@ if "opedate" in df_raw.columns:
         month_names = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
                        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
         op_date_str = f"{day_op} {month_names[month_op]} {year_th_op}"
-
         st.markdown(
             f"""
             <div style="
@@ -465,68 +403,56 @@ if "opedate" in df_raw.columns:
         )
     else:
         st.markdown("<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>", unsafe_allow_html=True)
-        small_divider(width_pct=25, thickness_px=2, color="#eeeeee", margin_px=8)
+        small_divider(25, 2, "#eeeeee", 8)
 else:
     st.markdown("<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>", unsafe_allow_html=True)
-    small_divider(width_pct=25, thickness_px=2, color="#eeeeee", margin_px=8)
-
-small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
+    small_divider(25, 2, "#eeeeee", 8)
+small_divider(70, 2, "#eeeeee", 12)
 
 # ===============================
 # OR SUMMARY
 # ===============================
 st.subheader("📊 OR-Minor Summary")
-
 summary_df_temp, meta_temp, _ = build_daily_summary(df_raw, use_fuzzy=False, fuzzy_threshold=85)
 total_cases = int(meta_temp["cases_total"])
 category_counts = meta_temp["category_counts"]
-
 top_categories = category_counts.sort_values(ascending=False).head(4)
 display_cats = top_categories.index.tolist()
-
 cols = st.columns(5)
 with cols[0]:
     st.markdown("<h4 style='text-align: center; color: black;'>Total</h4>", unsafe_allow_html=True)
     st.markdown(f"<h2 style='text-align: center; color: black; margin-top: -10px;'>{total_cases}</h2>", unsafe_allow_html=True)
-
 for i, cat in enumerate(display_cats):
     count = int(category_counts.get(cat, 0))
     with cols[i + 1]:
         st.markdown(f"<h4 style='text-align: center; color: black;'>{cat}</h4>", unsafe_allow_html=True)
         st.markdown(f"<h2 style='text-align: center; color: black; margin-top: -10px;'>{count}</h2>", unsafe_allow_html=True)
-
-small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
+small_divider(70, 2, "#eeeeee", 12)
 
 # ===============================
 # OPERATION ON-GOING
 # ===============================
 st.subheader("⏳ Operation On-going")
-
 proc_col = pick_text_col(df_raw, ["icd9cm_name", "operation", "opname", "procedure", "proc", "หัตถการ", "ผ่าตัด"])
 if proc_col:
     df_tmp = df_raw.copy()
     df_tmp["__proc_category__"] = df_tmp[proc_col].apply(classify_proc_category_rules)
-
     completed_by_category = {}
     for idx in st.session_state.get("completed_cases", set()):
         if 0 <= idx < len(df_tmp):
             cat = df_tmp.iloc[idx]["__proc_category__"]
             completed_by_category[cat] = completed_by_category.get(cat, 0) + 1
-
     ongoing_counts = {}
     for cat, total in category_counts.items():
         completed = int(completed_by_category.get(cat, 0))
         remaining = int(total) - completed
         if remaining > 0:
             ongoing_counts[cat] = remaining
-
     if ongoing_counts:
         ongoing_cats = sorted(ongoing_counts.items(), key=lambda x: x[1], reverse=True)
         ongoing_cols = st.columns(len(ongoing_cats) + 1)
-
         with ongoing_cols[0]:
             st.markdown("<h4 style='text-align: center; color: #2e86de;'>On-going</h4>", unsafe_allow_html=True)
-
         for i, (cat, count) in enumerate(ongoing_cats):
             with ongoing_cols[i + 1]:
                 st.markdown(f"<h4 style='text-align: center; color: black;'>{cat}</h4>", unsafe_allow_html=True)
@@ -535,15 +461,11 @@ if proc_col:
         st.success("🎉 ไม่มีเคสที่เหลือทำแล้ว")
 else:
     st.info("ไม่พบคอลัมน์หัตถการสำหรับคำนวณ On-going")
-
-# เวลา + เหลือเคส ใต้ On-going
 current_time = dt.datetime.now()
 year_th_cur = current_time.year + 543
 year_short_cur = year_th_cur % 100
 current_time_str = f"{current_time.day:02d}/{current_time.month:02d}/{year_short_cur:02d} {current_time.strftime('%H:%M:%S')}"
-
 remaining_cases = total_cases - len(st.session_state.get("completed_cases", set()))
-
 status_cols = st.columns(3)
 with status_cols[0]:
     st.markdown(f"<p style='text-align: left; color: black; margin-top: 20px;'><strong>⏰ เวลาปัจจุบัน:</strong> {current_time_str}</p>", unsafe_allow_html=True)
@@ -551,118 +473,38 @@ with status_cols[1]:
     st.markdown(f"<p style='text-align: center; color: #666666; margin-top: 20px;'><strong>📤 อัปโหลดเมื่อ:</strong> {upload_time_str}</p>", unsafe_allow_html=True)
 with status_cols[2]:
     st.markdown(f"<p style='text-align: right; color: #d73a3a; font-weight: bold; margin-top: 20px;'><strong>⏳ เหลือเคสที่ยังไม่เสร็จ:</strong> {remaining_cases} ราย</p>", unsafe_allow_html=True)
-
-small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
+small_divider(70, 2, "#eeeeee", 12)
 
 # ===============================
-# ✅ รายการผ่าตัดวันนี้ (ไม่แสดงชื่อผู้ป่วย/ชื่อแพทย์) + ปุ่มเสร็จแล้ว
+# ✅ รายการผ่าตัดวันนี้
 # ===============================
 st.subheader("✅ รายการผ่าตัดวันนี้ (ไม่แสดงชื่อผู้ป่วย/ชื่อแพทย์)")
-
 safe_cols = []
 if "icd9cm_name" in df_raw.columns:
     safe_cols.append("icd9cm_name")
 if "procnote" in df_raw.columns:
     safe_cols.append("procnote")
-
 if not safe_cols:
     st.info("ไม่พบคอลัมน์ Operation/Proc note สำหรับแสดงรายการแบบไม่ระบุตัวบุคคล")
 else:
     df_safe = df_raw.copy()
-
-    # เรียงตามเวลา ถ้ามี
     if "estmtime" in df_safe.columns:
         df_safe["__est_sort__"] = df_safe["estmtime"].apply(to_minutes_from_any)
         df_safe = df_safe.sort_values("__est_sort__", na_position="last").drop(columns="__est_sort__", errors="ignore")
-
     df_safe = df_safe[safe_cols].copy().reset_index(drop=True)
     df_safe.rename(columns={"icd9cm_name": "Operation", "procnote": "Proc note"}, inplace=True)
-
     completed = st.session_state["completed_cases"]
-
     header = st.columns([0.6, 3.5, 4.5, 1.4])
     header[0].markdown("**#**")
     header[1].markdown("**Operation**")
     header[2].markdown("**Proc note**")
     header[3].markdown("**สถานะ**")
-
     for i, row in df_safe.iterrows():
         c0, c1, c2, c3 = st.columns([0.6, 3.5, 4.5, 1.4])
         c0.write(i)
         c1.write(row.get("Operation", ""))
-
         proc_note = row.get("Proc note", "")
         c2.write("" if pd.isna(proc_note) else proc_note)
-
-        if i in completed:
-            c3.success("✓ เสร็จแล้ว")
-        else:
-            if c3.button("เสร็จแล้ว", key=f"done_safe_{i}"):
-                mark_completed(upload_date_str, active_file_name, i)  # บันทึกลง DB จริง ๆ
-                st.session_state["completed_cases"].add(i)               # update session
-                st.rerun()
-
-    col_reset1, col_reset2 = st.columns([6, 1.5])
-    with col_reset2:
-        if st.button("รีเซ็ตสถานะ", key="reset_completed_safe"):
-            reset_completed_cases(upload_date_str, active_file_name)  # ลบจาก DB จริง ๆ
-            st.session_state["completed_cases"] = set()                # update session
-            st.rerun()
-
-small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
-
-# ===============================
-# Daily case summary
-# ===============================
-st.subheader("📈 Daily case summary (เช้า/บ่าย/TF)")
-
-c1, c2, c3 = st.columns([1, 1, 2])
-with c1:
-    use_fuzzy = st.checkbox("เปิดใช้ Fuzzy Matching เมื่อเป็น Other", value=False)
-with c2:
-    fuzzy_threshold = st.slider("Fuzzy threshold", min_value=60, max_value=95, value=85, step=1)
-with c3:
-    st.caption("ถ้าไม่มี rapidfuzz จะ fallback เป็น rule-based อัตโนมัติ")
-
-summary_df, meta, df_work = build_daily_summary(df_raw, use_fuzzy=use_fuzzy, fuzzy_threshold=fuzzy_threshold)
-
-st.caption(
-    f"proc col: {meta.get('proc_col_used') or '-'} | "
-    f"time col: {meta.get('time_col_used') or '-'} | "
-    f"cases: {meta.get('cases_total')}"
-)
-
-base_cols = ["Shift", "Total"]
-active_categories = [col for col in PROC_CATEGORIES if col in summary_df.columns and (summary_df[col] > 0).any()]
-display_cols = base_cols[:1] + active_categories + base_cols[1:]
-if not active_categories and "Other" in summary_df.columns:
-    display_cols = ["Shift", "Other", "Total"]
-
-df_show(summary_df[display_cols], stretch=True)
-
-small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
-
-# ===============================
-# Other review (ไม่โชว์ข้อมูลดิบ/ชื่อคน)
-# ===============================
-st.subheader("🔍 Operation นอกเหนือที่ตั้งค่าไว้ (Other review)")
-proc_col_used = meta.get("proc_col_used")
-if not proc_col_used:
-    st.info("ไม่พบคอลัมน์หัตถการในไฟล์ จึงไม่สามารถทำ Other review ได้")
-else:
-    unk_df = top_unknowns(df_work, proc_col_used, n=25)
-    if unk_df.empty:
-        st.success("ไม่มีรายการที่ตกเป็น Other")
-    else:
-        st.caption("ใช้รายการนี้เพิ่ม ALIASES หรือ pattern ได้")
-        df_show(unk_df, stretch=True)
-
-# 🚫 ตัดส่วนดูข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
-small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
-# ในส่วนปุ่ม "เสร็จแล้ว" และ "รีเซ็ต" ใช้แบบนี้ (สำคัญ!)
-# (แทนที่ส่วนเดิม)
-if i in completed:
-            c3.success("✓ เสร็จแล้ว")
         if i in completed:
             c3.success("✓ เสร็จแล้ว")
         else:
@@ -676,12 +518,46 @@ if i in completed:
             reset_completed_cases(upload_date_str, active_file_name)
             st.session_state["completed_cases"] = set()
             st.rerun()
+small_divider(70, 2, "#eeeeee", 12)
 
-# ส่วนท้าย
+# ===============================
+# Daily case summary
+# ===============================
+st.subheader("📈 Daily case summary (เช้า/บ่าย/TF)")
+c1, c2, c3 = st.columns([1, 1, 2])
+with c1:
+    use_fuzzy = st.checkbox("เปิดใช้ Fuzzy Matching เมื่อเป็น Other", value=False)
+with c2:
+    fuzzy_threshold = st.slider("Fuzzy threshold", min_value=60, max_value=95, value=85, step=1)
+with c3:
+    st.caption("ถ้าไม่มี rapidfuzz จะ fallback เป็น rule-based อัตโนมัติ")
+summary_df, meta, df_work = build_daily_summary(df_raw, use_fuzzy=use_fuzzy, fuzzy_threshold=fuzzy_threshold)
+st.caption(
+    f"proc col: {meta.get('proc_col_used') or '-'} | "
+    f"time col: {meta.get('time_col_used') or '-'} | "
+    f"cases: {meta.get('cases_total')}"
+)
+base_cols = ["Shift", "Total"]
+active_categories = [col for col in PROC_CATEGORIES if col in summary_df.columns and (summary_df[col] > 0).any()]
+display_cols = base_cols[:1] + active_categories + base_cols[1:]
+if not active_categories and "Other" in summary_df.columns:
+    display_cols = ["Shift", "Other", "Total"]
+df_show(summary_df[display_cols], stretch=True)
+small_divider(70, 2, "#eeeeee", 12)
+
+# ===============================
+# Other review
+# ===============================
+st.subheader("🔍 Operation นอกเหนือที่ตั้งค่าไว้ (Other review)")
+proc_col_used = meta.get("proc_col_used")
+if not proc_col_used:
+    st.info("ไม่พบคอลัมน์หัตถการในไฟล์ จึงไม่สามารถทำ Other review ได้")
+else:
+    unk_df = top_unknowns(df_work, proc_col_used, n=25)
+    if unk_df.empty:
+        st.success("ไม่มีรายการที่ตกเป็น Other")
+    else:
+        st.caption("ใช้รายการนี้เพิ่ม ALIASES หรือ pattern ได้")
+        df_show(unk_df, stretch=True)
 small_divider(70, 2, "#eeeeee", 12)
 st.caption("Dashboard พร้อมใช้งานเต็มรูปแบบ! ไฟล์ Excel และสถานะเสร็จแล้วเป็น shared ทุกคนเห็นเหมือนกัน")
-
-
-
-
-
