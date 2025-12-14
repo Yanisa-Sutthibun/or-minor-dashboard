@@ -3,5 +3,6 @@ pandas
 openpyxl
 xlrd
 gspread
-gspread-pandas
-oauth2client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
