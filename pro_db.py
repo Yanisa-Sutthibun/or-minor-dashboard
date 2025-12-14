@@ -10,7 +10,31 @@ from io import BytesIO
 # ===============================
 st.set_page_config(page_title="OR-minor Schedule Dashboard", layout="wide")
 st.title("OR-minor Schedule Dashboard 📊")
+# วางไว้หลัง st.title เลยครับ
+# ===============================
+# PASSWORD PROTECTION
+# ===============================
+try:
+    PASSWORD = st.secrets["APP_PASSWORD"]  # ใช้รหัสจาก Secrets ถ้ามี
+except:
+    PASSWORD = "pghnurse30"  # ถ้าไม่มี (รันในเครื่อง) ใช้รหัสนี้แทน
 
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.markdown("### 🔐 เข้าสู่ระบบ OR Dashboard")
+    col1, col2 = st.columns([1, 2])
+    with col2:
+        password_input = st.text_input("กรุณาใส่รหัสผ่าน", type="password")
+        if st.button("เข้าสู่ระบบ"):
+            if password_input == PASSWORD:
+                st.session_state["authenticated"] = True
+                st.success("เข้าสู่ระบบสำเร็จ! 🎉")
+                st.rerun()
+            else:
+                st.error("รหัสผ่านไม่ถูกต้อง")
+    st.stop()
 # ===============================
 # Helper: dataframe width compat
 # ===============================
@@ -531,3 +555,4 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
+
