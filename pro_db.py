@@ -9,8 +9,10 @@ from io import BytesIO
 # 0) CONFIG
 # ===============================
 st.set_page_config(page_title="OR-minor Schedule Dashboard", layout="wide")
-st.title("OR-minor Schedule Dashboard 📊")
-
+st.markdown(
+    "<h1 style='font-size:34px; margin-bottom: 0.2rem;'>OR-minor Schedule Dashboard 📊</h1>",
+    unsafe_allow_html=True
+)
 # ===============================
 # PASSWORD PROTECTION
 # ===============================
@@ -44,7 +46,7 @@ with top_c1:
     if st.button("🔄 Refresh", key="btn_refresh"):
         st.rerun()
 with top_c2:
-    st.caption("ℹ️ กด Refresh เพื่ออัปเดต (ไม่แนะนำให้กด F5 แต่ถ้ากด F5 แล้วไฟล์ไม่ควรหาย)")
+    st.caption("ℹ️ กด Refresh เพื่ออัปเดต")
 with top_c3:
     if st.button("ออกจากระบบ", key="btn_logout"):
         st.session_state["authenticated"] = False
@@ -546,3 +548,4 @@ else:
 
 with st.expander("ดูข้อมูลดิบ (preview 50 แถวแรก)"):
     df_show(df_raw.head(50), stretch=True)
+
