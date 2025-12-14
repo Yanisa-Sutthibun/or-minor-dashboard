@@ -1,11 +1,3 @@
-st.write("Has gcp_service_account:", "gcp_service_account" in st.secrets)
-
-if "gcp_service_account" in st.secrets:
-    sa = st.secrets["gcp_service_account"]
-    st.write("Keys:", sa.keys())
-    st.write("Has private_key:", "private_key" in sa)
-    if "private_key" in sa:
-        st.write("private_key starts with:", sa["private_key"][:30])
 
 import streamlit as st
 import pandas as pd
@@ -16,6 +8,14 @@ from io import BytesIO
 
 import gspread
 from google.oauth2.service_account import Credentials
+st.write("Has gcp_service_account:", "gcp_service_account" in st.secrets)
+
+if "gcp_service_account" in st.secrets:
+    sa = st.secrets["gcp_service_account"]
+    st.write("Keys:", sa.keys())
+    st.write("Has private_key:", "private_key" in sa)
+    if "private_key" in sa:
+        st.write("private_key starts with:", sa["private_key"][:30])
 
 # ===============================
 # 0) CONFIG
@@ -673,6 +673,7 @@ else:
         df_show(unk_df, stretch=True)
 
 # ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
+
 
 
 
