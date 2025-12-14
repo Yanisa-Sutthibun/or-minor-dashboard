@@ -662,3 +662,11 @@ else:
         df_show(unk_df, stretch=True)
 
 # ✅ ตัด preview ข้อมูลดิบออกเพื่อป้องกันข้อมูลหลุด
+SHEET_ID = st.secrets["SHEET_ID"]
+SHEET_NAME = st.secrets.get("SHEET_NAME", "Sheet1")
+creds = ServiceAccountCredentials.from_json_keyfile_dict(
+    st.secrets["gcp_service_account"],
+    scope
+)
+
+
