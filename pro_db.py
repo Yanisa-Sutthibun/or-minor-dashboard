@@ -375,39 +375,50 @@ def top_unknowns(df_work: pd.DataFrame, proc_col: str, n=25) -> pd.DataFrame:
     return vc
 
 # ===============================
-# MAIN CONTENT: วันที่ผ่าตัด (opedate)
+# MAIN CONTENT: วันที่ผ่าตัด (ใช้ estmdate แทน opedate)
 # ===============================
-if "opedate" in df_raw.columns:
-    opedate_raw = pd.to_datetime(df_raw["opedate"].dropna().iloc[0], errors="coerce")
-    if pd.notna(opedate_raw):
-        day_op = opedate_raw.day
-        month_op = opedate_raw.month
-        year_th_op = opedate_raw.year + 543
-        month_names = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
-                       "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
-        op_date_str = f"{day_op} {month_names[month_op]} {year_th_op}"
-        st.markdown(
-            f"""
-            <div style="
-                text-align: center;
-                font-size: 24px;
-                font-weight: 600;
-                color: #1f77b4;
-                margin: 10px 0 4px 0;
-                text-decoration: none;
-            ">
-                📅 ตารางผ่าตัดวันที่ {op_date_str}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown("<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>", unsafe_allow_html=True)
-        small_divider(25, 2, "#eeeeee", 8)
+op_date_str = None
+
+# ลองดึงจาก estmdate ก่อน (วันที่คาดการณ์)
+date_col = None
+if "estmdate" in df_raw.columns:
+    date_col = "estmdate"
+elif "opedate" in df_raw.columns:  # fallback ถ้าไม่มี estmdate
+    date_col = "opedate"
+
+if date_col:
+    date_series = df_raw[date_col].dropna()
+    if not date_series.empty:
+        date_raw = pd.to_datetime(date_series.iloc[0], errors="coerce")
+        if pd.notna(date_raw):
+            day_op = date_raw.day
+            month_op = date_raw.month
+            year_th_op = date_raw.year + 543
+            month_names = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+                           "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+            op_date_str = f"{day_op} {month_names[month_op]} {year_th_op}"
+
+if op_date_str:
+    st.markdown(
+        f"""
+        <div style="
+            text-align: center;
+            font-size: 24px;
+            font-weight: 600;
+            color: #1f77b4;
+            margin: 10px 0 4px 0;
+            text-decoration: none;
+        ">
+            📅 ตารางผ่าตัดวันที่ {op_date_str}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 else:
     st.markdown("<div style='text-align:center; font-size:22px; font-weight:600; margin:10px 0;'>📅 ตารางผ่าตัด</div>", unsafe_allow_html=True)
-    small_divider(25, 2, "#eeeeee", 8)
-small_divider(70, 2, "#eeeeee", 12)
+    small_divider(width_pct=25, thickness_px=2, color="#eeeeee", margin_px=8)
+
+small_divider(width_pct=70, thickness_px=2, color="#eeeeee", margin_px=12)
 
 # ===============================
 # OR SUMMARY
@@ -561,3 +572,4 @@ else:
         df_show(unk_df, stretch=True)
 small_divider(70, 2, "#eeeeee", 12)
 st.caption("Dashboard พร้อมใช้งานเต็มรูปแบบ! ไฟล์ Excel และสถานะเสร็จแล้วเป็น shared ทุกคนเห็นเหมือนกัน")
+
