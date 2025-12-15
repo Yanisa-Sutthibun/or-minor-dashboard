@@ -213,6 +213,9 @@ ALIASES = {
     "frontalis sling": "ptosis correction",
     "frontalis suspension": "ptosis correction",
     "upper eyelid correction": "ptosis correction",
+    'incisional biopsy':'excision',
+    'incision biopsy':'excision',
+    'incision':'excison'
 }
 
 def normalize_proc_text(x: str) -> str:
@@ -258,6 +261,10 @@ def classify_proc_category_rules(proc_text: str) -> str:
         return "Eyelid correction"
     if re.search(r"\bfacelift\b", s) or re.search(r"\bface\s*lift\b", s) or re.search(r"\brhytidectomy\b", s):
         return "Facelift"
+        if re.search(r"\bincision(al)?\s*biopsy\b", s):
+        return "Excision"
+    if re.search(r"\bincision(al)?\b", s):  # จับ incision อย่างเดียวด้วย
+        return "Excision"
     return "Other"
 
 def classify_proc_category(proc_text: str, use_fuzzy: bool = False, threshold: int = 85) -> str:
@@ -572,4 +579,5 @@ else:
         df_show(unk_df, stretch=True)
 small_divider(70, 2, "#eeeeee", 12)
 st.caption("Dashboard พร้อมใช้งานเต็มรูปแบบ! ไฟล์ Excel และสถานะเสร็จแล้วเป็น shared ทุกคนเห็นเหมือนกัน")
+
 
