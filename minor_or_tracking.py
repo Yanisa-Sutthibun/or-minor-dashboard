@@ -141,14 +141,20 @@ def _read_csv(uploaded):
 def page_tracking():
     _inject_css()
 
-    st.markdown(
-        '<div style="background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);'
-        'border-radius:12px;padding:18px 24px;margin-bottom:12px;">'
-        '<h2 style="margin:0;color:#1565c0;font-size:26px;">🏥 Minor OR — Operating Room Management</h2>'
-        '<p style="margin:4px 0 0;color:#1976d2;font-size:14px;">'
-        'ระบบจัดการห้องผ่าตัดเล็ก (ทดลองใช้)</p></div>',
-        unsafe_allow_html=True,
-    )
+    _hdr_col1, _hdr_col2 = st.columns([9, 1])
+    with _hdr_col1:
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);'
+            'border-radius:12px;padding:18px 24px;">'
+            '<h2 style="margin:0;color:#1565c0;font-size:26px;">🏥 Minor OR — Operating Room Management</h2>'
+            '<p style="margin:4px 0 0;color:#1976d2;font-size:14px;">'
+            'ระบบจัดการห้องผ่าตัดเล็ก (ทดลองใช้)</p></div>',
+            unsafe_allow_html=True,
+        )
+    with _hdr_col2:
+        st.markdown('<div style="height:20px;"></div>', unsafe_allow_html=True)
+        if st.button('🔄', key='btn_refresh', help='รีเฟรชหน้า', use_container_width=True):
+            st.rerun()
 
     # ---- Date + Upload ----
     col_d, col_u = st.columns([1, 1])

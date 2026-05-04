@@ -519,12 +519,6 @@ def main():
         )
 
 
-    # --- ปุ่ม Refresh ด้านบนทุกหน้า ---
-    top_col1, top_col2 = st.columns([8, 1])
-    with top_col2:
-        if st.button('🔄', key='btn_refresh', help='รีเฟรชหน้า (F5)'):
-            st.rerun()
-
     # Route pages
     if page == '📋 ตารางผ่าตัด':
         page_tracking()
