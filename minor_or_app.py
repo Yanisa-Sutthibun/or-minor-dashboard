@@ -528,6 +528,9 @@ def main():
 
         st.markdown('---')
         st.markdown(
+            '<p style="font-size:11px;color:#95a5a6;text-align:center;">'
+            '<b>Trial Version</b><br>Minor OR Management<br>'
+            'ML Surgical Time Prediction<br>Chulalongkorn University</p>',
             unsafe_allow_html=True,
         )
 
