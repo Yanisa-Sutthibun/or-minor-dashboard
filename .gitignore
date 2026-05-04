@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.db
+*.db-wal
+*.db-shm
+minor_or_test.db
+backups/
+case_history.csv
+
+# ไม่ต้อง upload ไฟล์ fix/temp
+*_fix*.py
+tracking_fix*.py
+db_fix.py
+
+# ไฟล์เก่าที่ไม่ใช้
+minor_or_app_complete.py

@@ -1,0 +1,89 @@
+{
+  "version": "v3",
+  "n_samples": 6734,
+  "n_features": 16,
+  "best_model": "Lasso (alpha=0.1)",
+  "results": {
+    "Linear Regression": {
+      "MAE": 9.84,
+      "RMSE": 15.57,
+      "R2": 0.7372,
+      "MedAE": 6.4,
+      "MAPE": 30.57,
+      "within_10min": 65.2,
+      "within_15min": 81.4
+    },
+    "Ridge (alpha=1)": {
+      "MAE": 9.84,
+      "RMSE": 15.57,
+      "R2": 0.7372,
+      "MedAE": 6.4,
+      "MAPE": 30.57,
+      "within_10min": 65.2,
+      "within_15min": 81.4
+    },
+    "Ridge (alpha=10)": {
+      "MAE": 9.84,
+      "RMSE": 15.57,
+      "R2": 0.7372,
+      "MedAE": 6.4,
+      "MAPE": 30.57,
+      "within_10min": 65.2,
+      "within_15min": 81.4
+    },
+    "Lasso (alpha=0.1)": {
+      "MAE": 9.82,
+      "RMSE": 15.56,
+      "R2": 0.7374,
+      "MedAE": 6.4,
+      "MAPE": 30.5,
+      "within_10min": 65.3,
+      "within_15min": 81.6
+    },
+    "Random Forest": {
+      "MAE": 10.01,
+      "RMSE": 15.84,
+      "R2": 0.7281,
+      "MedAE": 6.66,
+      "MAPE": 31.27,
+      "within_10min": 65.4,
+      "within_15min": 80.3
+    },
+    "Gradient Boosting": {
+      "MAE": 10.16,
+      "RMSE": 16.14,
+      "R2": 0.7176,
+      "MedAE": 6.68,
+      "MAPE": 31.47,
+      "within_10min": 65.9,
+      "within_15min": 79.7
+    },
+    "XGBoost": {
+      "MAE": 10.3,
+      "RMSE": 16.34,
+      "R2": 0.7105,
+      "MedAE": 6.5,
+      "MAPE": 31.85,
+      "within_10min": 65.1,
+      "within_15min": 80.1
+    }
+  },
+  "feature_cols": [
+    "proc_enc",
+    "surgeon_enc",
+    "division_enc",
+    "age",
+    "op_hour",
+    "day_of_week",
+    "month",
+    "timeslot_enc",
+    "optype_enc",
+    "surgeon_avg_duration",
+    "proc_avg_duration",
+    "surg_proc_avg",
+    "scrub_enc",
+    "circ_enc",
+    "wait_min",
+    "month_avg"
+  ]
+}

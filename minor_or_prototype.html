@@ -1,0 +1,414 @@
+<\!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minor OR — Case Tracking Prototype v3</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f0f2f5; color: #2c3e50; padding: 20px; }
+  .container { max-width: 1280px; margin: 0 auto; }
+  h1 { font-size: 22px; color: #2c3e50; margin-bottom: 4px; }
+  .subtitle { color: #7f8c8d; font-size: 13px; margin-bottom: 20px; }
+
+  .tabs { display: flex; gap: 2px; margin-bottom: 0; }
+  .tab { padding: 10px 20px; background: #dfe6e9; border-radius: 8px 8px 0 0; cursor: pointer;
+         font-size: 14px; font-weight: 600; color: #636e72; transition: all .2s; }
+  .tab.active { background: white; color: #2c3e50; box-shadow: 0 -2px 4px rgba(0,0,0,.05); }
+  .tab:hover:not(.active) { background: #c8d6e5; }
+  .tab-content { display: none; background: white; border-radius: 0 8px 8px 8px;
+                 box-shadow: 0 2px 8px rgba(0,0,0,.08); padding: 20px; min-height: 500px; }
+  .tab-content.active { display: block; }
+
+  .upload-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+                padding: 12px 16px; background: #f8f9fa; border-radius: 8px; border: 1px dashed #bdc3c7; }
+  .upload-bar button { padding: 8px 16px; background: #3498db; color: white; border: none;
+                       border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .upload-bar button:hover { background: #2980b9; }
+  .upload-bar .info { color: #7f8c8d; font-size: 12px; }
+
+  .case-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .case-table th { background: #2c3e50; color: white; padding: 10px 6px; text-align: left;
+                   font-weight: 600; font-size: 11px; position: sticky; top: 0; white-space: nowrap; }
+  .case-table td { padding: 6px; border-bottom: 1px solid #ecf0f1; vertical-align: top; }
+  .case-table tr:hover { background: #f8f9fa; }
+  .case-table tr.ipd-row { background: #fef9e7; }
+  .case-table tr.after-hours-row { background: #fdf2e9; }
+  .case-table tr.walkin-row { background: #eaf2f8; }
+  .case-table tr.cancelled-row { background: #f5f5f5; opacity: 0.6; }
+  .case-table tr.cancelled-row td { text-decoration: line-through; color: #95a5a6; }
+  .case-table tr.cancelled-row .badge, .case-table tr.cancelled-row .cb-group { text-decoration: none; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+           font-weight: 600; white-space: nowrap; }
+  .badge-set { background: #d5f5e3; color: #27ae60; }
+  .badge-walkin { background: #d6eaf8; color: #2980b9; }
+  .badge-opd { background: #e8f8f5; color: #1abc9c; }
+  .badge-ipd { background: #fdebd0; color: #e67e22; }
+  .badge-after { background: #fadbd8; color: #e74c3c; }
+  .badge-auto { background: #ebdef0; color: #8e44ad; font-size: 10px; }
+  .badge-cancel { background: #fadbd8; color: #e74c3c; }
+
+  .cb-group { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+  .cb-item { display: flex; align-items: center; gap: 3px; font-size: 11px;
+             padding: 2px 6px; border-radius: 5px; background: #f8f9fa; border: 1px solid #ecf0f1; }
+  .cb-item.checked { background: #d5f5e3; border-color: #27ae60; }
+  .cb-item.disabled { background: #f0f0f0; color: #bdc3c7; }
+  .cb-item.auto-checked { background: #ebdef0; border-color: #8e44ad; }
+  .cb-item input[type="checkbox"] { accent-color: #27ae60; width: 14px; height: 14px; }
+
+  .postcall-status { display: inline-flex; align-items: center; gap: 3px; margin-left: 2px; }
+  .postcall-status select { font-size: 10px; padding: 1px 3px; border-radius: 3px; border: 1px solid #bdc3c7; }
+  .postcall-disabled { color: #95a5a6; font-size: 10px; font-style: italic; }
+
+  .div-select { font-size: 11px; padding: 2px 4px; border-radius: 4px; border: 1px solid #bdc3c7; background: white; }
+
+  .status-cell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .btn-cancel { font-size: 10px; padding: 2px 8px; background: white; color: #e74c3c;
+                border: 1px solid #e74c3c; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .btn-cancel:hover { background: #e74c3c; color: white; }
+  .btn-done { font-size: 10px; padding: 2px 8px; background: #27ae60; color: white;
+              border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+
+  .btn-walkin { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px;
+                background: #3498db; color: white; border: none; border-radius: 8px;
+                cursor: pointer; font-size: 13px; font-weight: 600; margin-top: 12px; }
+  .btn-walkin:hover { background: #2980b9; }
+
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                  gap: 12px; margin-bottom: 20px; }
+  .summary-card { background: white; border-radius: 12px; padding: 16px;
+                  box-shadow: 0 2px 6px rgba(0,0,0,.08); text-align: center; }
+  .summary-card .label { color: #7f8c8d; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .summary-card .value { font-size: 28px; font-weight: 700; }
+
+  .bar-chart { margin: 12px 0; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+  .bar-label { width: 100px; text-align: right; font-size: 12px; font-weight: 600; color: #2c3e50; flex-shrink: 0; }
+  .bar-track { flex: 1; background: #ecf0f1; border-radius: 6px; height: 26px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center;
+              padding-left: 8px; font-size: 11px; font-weight: 600; color: white; }
+
+  .completion-section { margin-top: 16px; }
+  .completion-row { display: flex; align-items: center; gap: 10px; margin: 6px 0;
+                    padding: 8px 12px; background: #f8f9fa; border-radius: 8px; }
+  .completion-label { width: 190px; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .completion-bar { flex: 1; background: #ecf0f1; border-radius: 6px; height: 20px; overflow: hidden; }
+  .completion-fill { height: 100%; border-radius: 6px; }
+  .completion-text { width: 120px; text-align: right; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .sub-row { margin-left: 24px; padding: 4px 14px; font-size: 11px; color: #636e72; }
+
+  .section-header { font-size: 15px; font-weight: 700; color: #2c3e50; margin: 18px 0 8px;
+                    padding-bottom: 5px; border-bottom: 2px solid #3498db; }
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
+  .filter-bar select { padding: 5px 8px; border-radius: 6px; border: 1px solid #bdc3c7; font-size: 12px; }
+  .filter-bar .count { margin-left: auto; color: #7f8c8d; font-size: 12px; }
+
+  .rules-box { margin-top:14px;padding:10px 14px;background:#eaf2f8;border-radius:8px;font-size:11px;
+               color:#2c3e50;line-height:1.8; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🏥 Minor OR — Case Tracking & Statistics</h1>
+  <p class="subtitle">ห้องผ่าตัดเล็ก — ระบบเก็บสถิติและติดตามเคส (Prototype v3)</p>
+
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('tab1')">📋 ตารางเคส</div>
+    <div class="tab" onclick="showTab('tab2')">📊 สรุปยอด</div>
+  </div>
+
+  <\!-- ==================== TAB 1 ==================== -->
+  <div id="tab1" class="tab-content active">
+
+    <div class="upload-bar">
+      <button>📁 Upload Schedule CSV</button>
+      <span class="info">อัปโหลดไฟล์ตาราง schedule → ระบบจัดกลุ่ม SET/WALK-IN, OPD/IPD/นอกเวลา อัตโนมัติ</span>
+    </div>
+
+    <\!-- Retro data banner -->
+    </div>
+
+    <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;font-size:11px;color:#636e72;">
+      <span><span class="badge badge-set">SET</span> นัดล่วงหน้า</span>
+      <span><span class="badge badge-walkin">WALK-IN</span> มาวันนั้น</span>
+      <span><span class="badge badge-opd">OPD</span> ผู้ป่วยนอก</span>
+      <span><span class="badge badge-ipd">IPD</span> ผู้ป่วยใน</span>
+      <span><span class="badge badge-after">นอกเวลา</span> หลัง 16:00</span>
+      <span><span class="badge badge-cancel">ยกเลิก</span> ไม่ได้ผ่า</span>
+    </div>
+
+    <div style="overflow-x:auto;">
+    <table class="case-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>ชื่อ</th>
+          <th>HN</th>
+          <th>หัตถการ</th>
+          <th>แพทย์</th>
+          <th>สาขา</th>
+          <th>เคส</th>
+          <th>ผู้ป่วย</th>
+          <th>สถานะ</th>
+          <th>เยี่ยม / ติดตาม / ผู้เยี่ยม</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <\!-- CASE 1: OPD SET ปกติ -->
+        <tr>
+          <td>1</td>
+          <td><b>นายสมชาย</b></td>
+          <td>HN001234</td>
+          <td>EXCISION MASS LT.ARM</td>
+          <td>นพ.วิชัย</td>
+          <td><select class="div-select"><option selected>GEN</option><option>URO</option><option>NEU</option><option>PLAS</option><option>SKIN</option><option>NEWBORN</option><option>ENT</option><option>VAS</option><option>ORTHO</option><option>OTHER</option></select></td>
+          <td><span class="badge badge-set">SET</span></td>
+          <td><span class="badge badge-opd">OPD</span></td>
+          <td><div class="status-cell"><span class="btn-done">✓ ผ่าแล้ว</span><button class="btn-cancel" onclick="cancelCase(this)">✕ ยกเลิก</button></div></td>
+          <td>
+            <div class="cb-group">
+              <label class="cb-item checked"><input type="checkbox" checked onchange="toggleCb(this)"> OSS</label>
+              <label class="cb-item checked"><input type="checkbox" checked onchange="toggleCb(this)"> OR เยี่ยม</label>
+              <label class="cb-item" id="pc1"><input type="checkbox" onchange="togglePostcall(this,'ps1')"> โทร
+                <span class="postcall-status" id="ps1" style="display:none;"><select><option>เยี่ยมได้</option><option>ไม่รับสาย</option></select></span>
+              </label>
+            </div>
+          </td>
+        </tr>
+
+        <\!-- CASE 2: IPD -->
+        <tr class="ipd-row">
+          <td>2</td>
+          <td><b>น.ส.มณี</b></td>
+          <td>HN005678</td>
+          <td>CIRCUMCISION</td>
+          <td>นพ.ประพันธ์</td>
+          <td><select class="div-select"><option>GEN</option><option selected>URO</option><option>NEU</option><option>PLAS</option><option>SKIN</option><option>NEWBORN</option><option>ENT</option><option>VAS</option><option>ORTHO</option><option>OTHER</option></select></td>
+          <td><span class="badge badge-set">SET</span></td>
+          <td><span class="badge badge-ipd">IPD</span> <span style="font-size:10px;color:#e67e22;">AN660012</span></td>
+          <td><div class="status-cell"><span class="btn-done">✓ ผ่าแล้ว</span><button class="btn-cancel" onclick="cancelCase(this)">✕ ยกเลิก</button></div></td>
+          <td>
+            <div class="cb-group">
+              <label class="cb-item"><input type="checkbox" onchange="toggleCb(this)"> OSS</label>
+              <label class="cb-item checked"><input type="checkbox" checked onchange="toggleCb(this)"> OR เยี่ยม</label>
+              <label class="cb-item disabled"><input type="checkbox" disabled> <span class="postcall-disabled">ไม่ต้องโทร (IPD)</span></label>
+            </div>
+          </td>
+        </tr>
+
+        <\!-- CASE 3: นอกเวลา + OR เล็กเยี่ยมเอง -->
+        <tr class="after-hours-row">
+          <td>3</td>
+          <td><b>นายวิทยา</b></td>
+          <td>HN009012</td>
+          <td>I&D ABSCESS PERIANAL</td>
+          <td>นพ.สมศักดิ์</td>
+          <td><select class="div-select"><option selected>GEN</option><option>URO</option><option>NEU</option><option>PLAS</option><option>SKIN</option><option>NEWBORN</option><option>ENT</option><option>VAS</option><option>ORTHO</option><option>OTHER</option></select></td>
+          <td><span class="badge badge-set">SET</span></td>
+          <td><span class="badge badge-after">นอกเวลา</span></td>
+          <td><div class="status-cell"><span class="btn-done">✓ ผ่าแล้ว</span><button class="btn-cancel" onclick="cancelCase(this)">✕ ยกเลิก</button></div></td>
+          <td>
+            <div class="cb-group">
+              <label class="cb-item auto-checked"><input type="checkbox" disabled> <s>OSS</s> <span style="font-size:9px;color:#8e44ad;">OR เยี่ยมเอง</span></label>
+              <label class="cb-item auto-checked"><input type="checkbox" checked disabled> OR เยี่ยม <span class="badge badge-auto">auto</span></label>
+              <label class="cb-item checked"><input type="checkbox" checked onchange="togglePostcall(this,'ps3')"> โทร
+                <span class="postcall-status" id="ps3"><select><option selected>เยี่ยมได้</option><option>ไม่รับสาย</option></select></span>
+              </label>
+            </div>
+          </td>
+        </tr>
+
+        <\!-- CASE 4: WALK-IN -->
+        <tr class="walkin-row">
+          <td>4</td>
+          <td><b>น.ส.ปราณี</b></td>
+          <td>HN003456</td>
+          <td>SUTURE WOUND FACE</td>
+          <td>นพ.อนันต์</td>
+          <td><select class="div-select"><option>GEN</option><option>URO</option><option>NEU</option><option selected>PLAS</option><option>SKIN</option><option>NEWBORN</option><option>ENT</option><option>VAS</option><option>ORTHO</option><option>OTHER</option></select></td>
+          <td><span class="badge badge-walkin">WALK-IN</span></td>
+          <td><span class="badge badge-opd">OPD</span></td>
+          <td><div class="status-cell"><span class="btn-done">✓ ผ่าแล้ว</span><button class="btn-cancel" onclick="cancelCase(this)">✕ ยกเลิก</button></div></td>
+          <td>
+            <div class="cb-group">
+              <label class="cb-item"><input type="checkbox" onchange="toggleCb(this)"> OSS</label>
+              <label class="cb-item"><input type="checkbox" onchange="toggleCb(this)"> OR เยี่ยม</label>
+              <label class="cb-item"><input type="checkbox" onchange="togglePostcall(this,'ps4')"> โทร
+                <span class="postcall-status" id="ps4" style="display:none;"><select><option>เยี่ยมได้</option><option>ไม่รับสาย</option></select></span>
+              </label>
+            </div>
+          </td>
+        </tr>
+
+        <\!-- CASE 5: โทรแล้ว ไม่รับสาย -->
+        <tr>
+          <td>5</td>
+          <td><b>นายธนกฤต</b></td>
+          <td>HN007890</td>
+          <td>REMOVAL LIPOMA BACK</td>
+          <td>นพ.วิชัย</td>
+          <td><select class="div-select"><option selected>GEN</option><option>URO</option><option>NEU</option><option>PLAS</option><option>SKIN</option><option>NEWBORN</option><option>ENT</option><option>VAS</option><option>ORTHO</option><option>OTHER</option></select></td>
+          <td><span class="badge badge-set">SET</span></td>
+          <td><span class="badge badge-opd">OPD</span></td>
+          <td><div class="status-cell"><span class="btn-done">✓ ผ่าแล้ว</span><button class="btn-cancel" onclick="cancelCase(this)">✕ ยกเลิก</button></div></td>
+          <td>
+            <div class="cb-group">
+              <label class="cb-item checked"><input type="checkbox" checked onchange="toggleCb(this)"> OSS</label>
+              <label class="cb-item checked"><input type="checkbox" checked onchange="toggleCb(this)"> OR เยี่ยม</label>
+              <label class="cb-item checked" style="border-color:#e74c3c;background:#fef5f5;"><input type="checkbox" checked onchange="togglePostcall(this,'ps5')"> โทร
+                <span class="postcall-status" id="ps5"><select><option>เยี่ยมได้</option><option selected>ไม่รับสาย</option></select></span>
+              </label>
+            </div>
+          </td>
+        </tr>
+
+        <\!-- CASE 6: ★ ยกเลิกผ่าตัด — SET มาแต่ไม่ได้ผ่า -->
+        <tr class="cancelled-row">
+          <td>6</td>
+          <td><b>นายสุเทพ</b></td>
+          <td>HN004321</td>
+          <td>BIOPSY SKIN LESION</td>
+          <td>นพ.วิชัย</td>
+          <td><select class="div-select" disabled><option selected>SKIN</option></select></td>
+          <td><span class="badge badge-set">SET</span></td>
+          <td><span class="badge badge-opd">OPD</span></td>
+          <td><span class="badge badge-cancel" style="text-decoration:none;">✕ ยกเลิก</span></td>
+          <td style="text-decoration:none;">
+            <div class="cb-group">
+              <label class="cb-item disabled"><input type="checkbox" disabled> —</label>
+              <span style="font-size:11px;color:#95a5a6;font-style:italic;">ยกเลิก: ผู้ป่วย NPO ไม่ครบ</span>
+            </div>
+          </td>
+        </tr>
+
+
+      </tbody>
+    </table>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn-walkin" onclick="alert('ฟอร์ม Walk-in: ชื่อ, HN, หัตถการ, แพทย์, สาขา')">➕ เพิ่มเคส Walk-in</button>
+    </div>
+
+    <div class="rules-box">
+      <b>📝 กฎ Auto-Classification:</b><br>
+      <b>ประเภทเคส:</b> SET = นัดก่อน op_date ≥ 1 วัน &amp; request_time &lt; 15:00 | ที่เหลือ = WALK-IN<br>
+      <b>ประเภทผู้ป่วย:</b> ① มี AN → IPD | ② est_time ≥ 16:00 หรือ "นอกเวลา" ใน procnote → นอกเวลา | ③ ที่เหลือ → OPD<br>
+      <b>OSS:</b> procnote มี "OR เล็กเยี่ยม" → disable OSS, auto-check OR เยี่ยม | <b>โทร:</b> IPD → disable<br>
+      <b>ยกเลิก:</b> กดยกเลิก → ระบุเหตุผล → เคสเทาลง ไม่นับใน checkbox stats แต่นับในยอดรวม<br>
+          </div>
+  </div>
+
+  <\!-- ==================== TAB 2 ==================== -->
+  <div id="tab2" class="tab-content">
+
+    <div class="filter-bar">
+      <select><option>เมษายน 2569</option><option>7 วันล่าสุด</option><option>30 วันล่าสุด</option><option>ทั้งหมด</option></select>
+      <span class="count">📦 ข้อมูลสะสม: <b>148</b> เคส</span>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card"><div class="label">เคสทั้งหมด</div><div class="value" style="color:#3498db;">148</div></div>
+      <div class="summary-card"><div class="label">ผ่าแล้ว</div><div class="value" style="color:#27ae60;">142</div><div style="font-size:11px;color:#7f8c8d;">95.9%</div></div>
+      <div class="summary-card"><div class="label">ยกเลิก</div><div class="value" style="color:#e74c3c;">6</div><div style="font-size:11px;color:#7f8c8d;">4.1%</div></div>
+      <div class="summary-card"><div class="label">SET</div><div class="value" style="color:#27ae60;">112</div><div style="font-size:11px;color:#7f8c8d;">75.7%</div></div>
+      <div class="summary-card"><div class="label">WALK-IN</div><div class="value" style="color:#3498db;">36</div><div style="font-size:11px;color:#7f8c8d;">24.3%</div></div>
+    </div>
+
+    <div class="section-header">🏥 ประเภทผู้ป่วย (เฉพาะผ่าแล้ว 142 เคส)</div>
+    <div class="summary-grid">
+      <div class="summary-card"><div class="label">OPD</div><div class="value" style="color:#27ae60;">95</div><div style="font-size:11px;color:#7f8c8d;">66.9%</div></div>
+      <div class="summary-card"><div class="label">IPD (มี AN)</div><div class="value" style="color:#e67e22;">32</div><div style="font-size:11px;color:#7f8c8d;">22.5%</div></div>
+      <div class="summary-card"><div class="label">นอกเวลา</div><div class="value" style="color:#e74c3c;">15</div><div style="font-size:11px;color:#7f8c8d;">10.6%</div></div>
+    </div>
+
+    <div class="section-header">🔝 Top 5 หัตถการ</div>
+    <div class="bar-chart">
+      <div class="bar-row"><span class="bar-label">EXCISION MASS</span><div class="bar-track"><div class="bar-fill" style="width:100%;background:linear-gradient(90deg,#3498db,#2980b9);">38</div></div></div>
+      <div class="bar-row"><span class="bar-label">CIRCUMCISION</span><div class="bar-track"><div class="bar-fill" style="width:68%;background:linear-gradient(90deg,#2ecc71,#27ae60);">26</div></div></div>
+      <div class="bar-row"><span class="bar-label">I&D ABSCESS</span><div class="bar-track"><div class="bar-fill" style="width:47%;background:linear-gradient(90deg,#e67e22,#d35400);">18</div></div></div>
+      <div class="bar-row"><span class="bar-label">DEBRIDEMENT</span><div class="bar-track"><div class="bar-fill" style="width:37%;background:linear-gradient(90deg,#9b59b6,#8e44ad);">14</div></div></div>
+      <div class="bar-row"><span class="bar-label">SUTURE WOUND</span><div class="bar-track"><div class="bar-fill" style="width:29%;background:linear-gradient(90deg,#e74c3c,#c0392b);">11</div></div></div>
+    </div>
+
+    <div class="section-header">🔬 สาขา</div>
+    <div class="bar-chart">
+      <div class="bar-row"><span class="bar-label">GEN</span><div class="bar-track"><div class="bar-fill" style="width:100%;background:#3498db;">55</div></div></div>
+      <div class="bar-row"><span class="bar-label">URO</span><div class="bar-track"><div class="bar-fill" style="width:51%;background:#2ecc71;">28</div></div></div>
+      <div class="bar-row"><span class="bar-label">PLAS</span><div class="bar-track"><div class="bar-fill" style="width:40%;background:#e67e22;">22</div></div></div>
+      <div class="bar-row"><span class="bar-label">SKIN</span><div class="bar-track"><div class="bar-fill" style="width:22%;background:#9b59b6;">12</div></div></div>
+      <div class="bar-row"><span class="bar-label">ENT</span><div class="bar-track"><div class="bar-fill" style="width:16%;background:#1abc9c;">9</div></div></div>
+      <div class="bar-row"><span class="bar-label">VAS</span><div class="bar-track"><div class="bar-fill" style="width:13%;background:#e74c3c;">7</div></div></div>
+      <div class="bar-row"><span class="bar-label">ORTHO</span><div class="bar-track"><div class="bar-fill" style="width:9%;background:#f39c12;">5</div></div></div>
+      <div class="bar-row"><span class="bar-label">NEU</span><div class="bar-track"><div class="bar-fill" style="width:5%;background:#636e72;">3</div></div></div>
+      <div class="bar-row"><span class="bar-label">NEWBORN</span><div class="bar-track"><div class="bar-fill" style="width:2%;background:#bdc3c7;">1</div></div></div>
+    </div>
+
+    <div class="section-header">✅ Checkbox Completion (เฉพาะเคสที่ผ่าแล้ว ไม่รวมยกเลิก)</div>
+    <div class="completion-section">
+      <div class="completion-row">
+        <span class="completion-label">OSS เยี่ยม</span>
+        <div class="completion-bar"><div class="completion-fill" style="width:72.7%;background:linear-gradient(90deg,#27ae60,#2ecc71);"></div></div>
+        <span class="completion-text" style="color:#27ae60;">80/110 (72.7%)</span>
+      </div>
+      <div class="sub-row">* หาร 110 = ผ่าแล้ว 142 - OR เยี่ยมเอง 32</div>
+
+      <div class="completion-row">
+        <span class="completion-label">OR เล็กเยี่ยมก่อนผ่า</span>
+        <div class="completion-bar"><div class="completion-fill" style="width:97.2%;background:linear-gradient(90deg,#3498db,#2980b9);"></div></div>
+        <span class="completion-text" style="color:#3498db;">138/142 (97.2%)</span>
+      </div>
+
+      <div class="completion-row">
+        <span class="completion-label">โทรเยี่ยมหลังผ่า</span>
+        <div class="completion-bar"><div class="completion-fill" style="width:89.1%;background:linear-gradient(90deg,#e67e22,#d35400);"></div></div>
+        <span class="completion-text" style="color:#e67e22;">98/110 (89.1%)</span>
+      </div>
+      <div class="sub-row">* หาร 110 = ผ่าแล้ว 142 - IPD 32</div>
+      <div class="sub-row" style="display:flex;gap:20px;">
+        <span>✅ เยี่ยมได้: <b>90</b> (91.8%)</span>
+        <span>📵 ไม่รับสาย: <b>8</b> (8.2%)</span>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;display:flex;gap:8px;">
+      <button style="padding:7px 14px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;">📥 Export CSV</button>
+      <button style="padding:7px 14px;background:#3498db;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;">📊 Export PDF Report</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  const idx = id === 'tab1' ? 0 : 1;
+  document.querySelectorAll('.tab')[idx].classList.add('active');
+}
+function toggleCb(el) {
+  const item = el.closest('.cb-item');
+  item.classList.toggle('checked', el.checked);
+}
+function togglePostcall(el, sid) {
+  const s = document.getElementById(sid);
+  const item = el.closest('.cb-item');
+  if (el.checked) { s.style.display='inline-flex'; item.classList.add('checked'); }
+  else { s.style.display='none'; item.classList.remove('checked'); }
+}
+function cancelCase(btn) {
+  const reason = prompt('เหตุผลที่ยกเลิก:');
+  if (reason === null) return;
+  const tr = btn.closest('tr');
+  tr.className = 'cancelled-row';
+  const statusCell = btn.closest('.status-cell');
+  statusCell.innerHTML = '<span class="badge badge-cancel" style="text-decoration:none;">✕ ยกเลิก</span>';
+  const cbCell = tr.querySelector('td:last-child');
+  cbCell.style.textDecoration = 'none';
+  cbCell.innerHTML = '<div class="cb-group"><span style="font-size:11px;color:#95a5a6;font-style:italic;">ยกเลิก: ' + reason + '</span></div>';
+}
+</script>
+</body>
+</html>
