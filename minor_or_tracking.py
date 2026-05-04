@@ -141,8 +141,20 @@ def _read_csv(uploaded):
 def page_tracking():
     _inject_css()
 
-    st.markdown('<h2 style="margin:0;color:#212121;">ห้องผ่าตัดเล็ก</h2>',
-                unsafe_allow_html=True)
+    # --- Banner ---
+    import base64, os
+    _banner_path = os.path.join(os.path.dirname(__file__), 'banner.png')
+    if os.path.exists(_banner_path):
+        with open(_banner_path, 'rb') as _bf:
+            _b64 = base64.b64encode(_bf.read()).decode()
+        st.markdown(
+            f'<img src="data:image/png;base64,{_b64}" '
+            f'style="width:100%;border-radius:12px;margin-bottom:12px;" />',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<h2 style="margin:0;color:#212121;">ห้องผ่าตัดเล็ก</h2>',
+                    unsafe_allow_html=True)
 
     # ---- Date + Upload ----
     col_d, col_u = st.columns([1, 1])
