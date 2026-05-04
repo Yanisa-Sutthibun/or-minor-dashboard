@@ -141,23 +141,17 @@ def _read_csv(uploaded):
 def page_tracking():
     _inject_css()
 
-    _hdr_col1, _hdr_col2 = st.columns([9, 1])
-    with _hdr_col1:
-        st.markdown(
-            '<div style="background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);'
-            'border-radius:12px;padding:18px 24px;">'
-            '<h2 style="margin:0;color:#1565c0;font-size:26px;">🏥 Minor OR — Operating Room Management</h2>'
-            '<p style="margin:4px 0 0;color:#1976d2;font-size:14px;">'
-            'ระบบจัดการห้องผ่าตัดเล็ก (ทดลองใช้)</p></div>',
-            unsafe_allow_html=True,
-        )
-    with _hdr_col2:
-        st.markdown('<div style="height:20px;"></div>', unsafe_allow_html=True)
-        if st.button('🔄', key='btn_refresh', help='รีเฟรชหน้า', use_container_width=True):
-            st.rerun()
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);'
+        'border-radius:12px;padding:18px 24px;margin-bottom:10px;">'
+        '<h2 style="margin:0;color:#1565c0;font-size:26px;">🏥 Minor OR — Operating Room Management</h2>'
+        '<p style="margin:4px 0 0;color:#1976d2;font-size:14px;">'
+        'ระบบจัดการห้องผ่าตัดเล็ก (ทดลองใช้)</p></div>',
+        unsafe_allow_html=True,
+    )
 
-    # ---- Date + Upload ----
-    col_d, col_u = st.columns([1, 1])
+    # ---- Date + Upload + Refresh ----
+    col_d, col_u, col_r = st.columns([4, 4, 1])
     with col_d:
         view_date = st.date_input("📅 วันที่",
                                    value=datetime.now().date(),
@@ -167,6 +161,10 @@ def page_tracking():
         uploaded = st.file_uploader("นำเข้าตาราง CSV",
                                      type=['csv'], key='csv_up',
                                      label_visibility='collapsed')
+    with col_r:
+        st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+        if st.button('🔄 Refresh', key='btn_refresh', use_container_width=True):
+            st.rerun()
 
     if uploaded:
         df_up = _read_csv(uploaded)
@@ -1069,6 +1067,6 @@ def _tab_summary():
     if s_all['total'] > 0:
         df_all = get_cases()
         csv_data = df_all.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 ดาวน์โหลดข้อมูลทั้งหมด (CSV)", csv_data,
-                           "minor_or_cases.csv", "text/csv",
+        st.download_button('📥 ดาวน์โหลดข้อมูลทั้งหมด (CSV)', csv_data,
+                           'minor_or_cases.csv', 'text/csv',
                            use_container_width=True)
