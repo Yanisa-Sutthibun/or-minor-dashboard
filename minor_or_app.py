@@ -61,6 +61,12 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# --- Auto-refresh ทุก 30 นาที (1800000 ms) ---
+st.markdown(
+    '<script>setTimeout(function(){window.location.reload();}, 1800000);</script>',
+    unsafe_allow_html=True,
+)
+
 init_session_state()
 
 # Restore room settings from DB on first load (fix #1: persist across restarts)
@@ -512,6 +518,13 @@ def main():
             unsafe_allow_html=True,
         )
 
+
+    # --- ปุ่ม Refresh ด้านบนทุกหน้า ---
+    top_col1, top_col2 = st.columns([8, 1])
+    with top_col2:
+        if st.button('🔄', key='btn_refresh', help='รีเฟรชหน้า (F5)'):
+            st.rerun()
+
     # Route pages
     if page == '📋 ตารางผ่าตัด':
         page_tracking()
@@ -522,5 +535,5 @@ def main():
 
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
