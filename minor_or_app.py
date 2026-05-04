@@ -61,6 +61,22 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# --- Banner + ลด padding ---
+import base64, pathlib
+_banner_path = pathlib.Path(__file__).parent / 'banner.png'
+if not _banner_path.exists():
+    _banner_path = pathlib.Path('banner.png')
+if _banner_path.exists():
+    _b64 = base64.b64encode(_banner_path.read_bytes()).decode()
+    st.markdown(
+        '<style>'
+        '[data-testid="stAppViewBlockContainer"]{padding-top:1rem !important;}'
+        '</style>'
+        f'<img src="data:image/png;base64,{_b64}" '
+        f'style="width:100%;border-radius:10px;margin-bottom:10px;" />',
+        unsafe_allow_html=True,
+    )
+
 # --- Auto-refresh ทุก 30 นาที (1800000 ms) ---
 st.markdown(
     '<script>setTimeout(function(){window.location.reload();}, 1800000);</script>',
@@ -512,9 +528,6 @@ def main():
 
         st.markdown('---')
         st.markdown(
-            '<p style="font-size:11px;color:#95a5a6;text-align:center;">'
-            '<b>Trial Version</b><br>Minor OR Management<br>'
-            'ML Surgical Time Prediction<br>Chulalongkorn University</p>',
             unsafe_allow_html=True,
         )
 

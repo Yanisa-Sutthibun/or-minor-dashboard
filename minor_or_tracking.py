@@ -141,29 +141,8 @@ def _read_csv(uploaded):
 def page_tracking():
     _inject_css()
 
-    # --- Banner ---
-    import base64, pathlib
-    _banner_candidates = [
-        pathlib.Path(__file__).parent / 'banner.png',
-        pathlib.Path('banner.png'),
-        pathlib.Path('.') / 'banner.png',
-    ]
-    _banner_found = None
-    for _bp in _banner_candidates:
-        if _bp.exists():
-            _banner_found = _bp
-            break
-    if _banner_found:
-        _b64 = base64.b64encode(_banner_found.read_bytes()).decode()
-        st.markdown(
-            '<style>.block-container{padding-top:1rem !important;}</style>'
-            f'<img src="data:image/png;base64,{_b64}" '
-            f'style="width:100%;border-radius:10px;margin:0 0 8px 0;display:block;" />',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown('<h2 style="margin:0;color:#212121;">ห้องผ่าตัดเล็ก</h2>',
-                    unsafe_allow_html=True)
+    st.markdown('<h2 style="margin:0;color:#212121;">ห้องผ่าตัดเล็ก</h2>',
+                unsafe_allow_html=True)
 
     # ---- Date + Upload ----
     col_d, col_u = st.columns([1, 1])
