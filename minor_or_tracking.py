@@ -156,8 +156,9 @@ def page_tracking():
     if _banner_found:
         _b64 = base64.b64encode(_banner_found.read_bytes()).decode()
         st.markdown(
+            '<style>.block-container{padding-top:1rem !important;}</style>'
             f'<img src="data:image/png;base64,{_b64}" '
-            f'style="width:100%;border-radius:12px;margin-bottom:12px;" />',
+            f'style="width:100%;border-radius:10px;margin:0 0 8px 0;display:block;" />',
             unsafe_allow_html=True,
         )
     else:
