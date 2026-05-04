@@ -141,8 +141,14 @@ def _read_csv(uploaded):
 def page_tracking():
     _inject_css()
 
-    st.markdown('<h2 style="margin:0;color:#212121;">ห้องผ่าตัดเล็ก</h2>',
-                unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);'
+        'border-radius:12px;padding:18px 24px;margin-bottom:12px;">'
+        '<h2 style="margin:0;color:#1565c0;font-size:26px;">🏥 Minor OR — Operating Room Management</h2>'
+        '<p style="margin:4px 0 0;color:#1976d2;font-size:14px;">'
+        'ระบบจัดการห้องผ่าตัดเล็ก (ทดลองใช้)</p></div>',
+        unsafe_allow_html=True,
+    )
 
     # ---- Date + Upload ----
     col_d, col_u = st.columns([1, 1])
@@ -1027,6 +1033,7 @@ def _tab_summary():
         n_cancel = len(df_today[df_today['status'] == 'cancelled'])
         if n_cancel > 0:
             st.caption(f"❌ ยกเลิก {n_cancel} ราย")
+            st.caption(f"❌ ยกเลิก {n_cancel} ราย")
     else:
         st.info("ยังไม่มีเคสวันนี้")
 
@@ -1059,8 +1066,3 @@ def _tab_summary():
         st.download_button("📥 ดาวน์โหลดข้อมูลทั้งหมด (CSV)", csv_data,
                            "minor_or_cases.csv", "text/csv",
                            use_container_width=True)
-
-
-# ============================================================================
-# BACKWARD COMPAT
-# ============================================================================
