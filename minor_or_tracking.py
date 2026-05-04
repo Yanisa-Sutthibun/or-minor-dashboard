@@ -142,11 +142,19 @@ def page_tracking():
     _inject_css()
 
     # --- Banner ---
-    import base64, os
-    _banner_path = os.path.join(os.path.dirname(__file__), 'banner.png')
-    if os.path.exists(_banner_path):
-        with open(_banner_path, 'rb') as _bf:
-            _b64 = base64.b64encode(_bf.read()).decode()
+    import base64, pathlib
+    _banner_candidates = [
+        pathlib.Path(__file__).parent / 'banner.png',
+        pathlib.Path('banner.png'),
+        pathlib.Path('.') / 'banner.png',
+    ]
+    _banner_found = None
+    for _bp in _banner_candidates:
+        if _bp.exists():
+            _banner_found = _bp
+            break
+    if _banner_found:
+        _b64 = base64.b64encode(_banner_found.read_bytes()).decode()
         st.markdown(
             f'<img src="data:image/png;base64,{_b64}" '
             f'style="width:100%;border-radius:12px;margin-bottom:12px;" />',
