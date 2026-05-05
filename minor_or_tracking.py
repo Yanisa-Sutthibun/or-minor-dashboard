@@ -1485,6 +1485,47 @@ def _tab_summary():
         _render_after_hours_summary(df_today, prefix="today")
 
     # =============================================
+    # SUB-TAB 2: สรุปยอดสถิติ (สะสม)
+    # =============================================
+    with sub_stats:
+        period = st.selectbox("ช่วงเวลา", ["7 วัน", "30 วัน", "ทั้งหมด"],
+                              index=2, key='sum_period')
+        if period == "7 วัน":
+            d_from = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        elif period == "30 วัน":
+            d_from = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        else:
+            d_from = None
+
+        s_all = get_summary(date_from=d_from, date_to=today)
+
+        # --- Section: ในเวลา ---
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);'
+            'border-radius:10px;padding:10px 16px;margin:8px 0;">'
+            '<span style="font-size:16px;font-weight:700;color:#2e7d32;">'
+            '🏥 เคสในเวลา (สะสม)</span></div>',
+            unsafe_allow_html=True,
+        )
+        _render_summary_section(s_all, "สะสม", "all")
+
+        st.markdown("")
+        st.markdown("")
+
+        # --- Section: นอกเวลา ---
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);'
+            'border-radius:10px;padding:10px 16px;margin:8px 0;">'
+            '<span style="font-size:16px;font-weight:700;color:#c62828;">'
+            '🌙 เคสนอกเวลา (สะสม)</span></div>',
+            unsafe_allow_html=True,
+        )
+        df_all_cases = get_cases()
+        if d_from:
+            df_all_cases = df_all_cases[df_all_cases['op_date'] >= d_from]
+        _render_after_hours_summary(df_all_cases, prefix="stats")
+
+        st.markdown("---")
 
         # ---- Download ----
         if s_all['total'] > 0:
