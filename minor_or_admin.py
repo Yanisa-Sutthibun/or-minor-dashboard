@@ -614,10 +614,7 @@ def page_admin():
 
     # -- TAB 1: Today overview --
     with tab_today:
-        # Date picker
-        with st.expander("📅 เลือกวันที่", expanded=False):
-            sel_date = st.date_input("วันที่", value=datetime.now().date(), key="admin_date")
-            op_date = sel_date.strftime('%Y-%m-%d')
+        op_date = datetime.now().strftime('%Y-%m-%d')
 
         # =========================================================
         # Section: เคสในเวลา
@@ -688,22 +685,43 @@ def page_admin():
 
     # -- TAB 2: Historical analytics --
     with tab_history:
-        period = st.radio(
-            "เลือกช่วงเวลา", ["7 วัน", "30 วัน", "90 วัน", "ทั้งหมด"],
+        today_dt = datetime.now().date()
+
+        # --- Quick preset buttons ---
+        preset = st.radio(
+            "ช่วงเวลา", ["7 วัน", "30 วัน", "90 วัน", "กำหนดเอง"],
             horizontal=True, key="hist_period", label_visibility='collapsed',
         )
-        today_dt = datetime.now().date()
-        if period == "7 วัน":
-            d_from = (today_dt - timedelta(days=6)).strftime('%Y-%m-%d')
-            d_to = today_dt.strftime('%Y-%m-%d')
-        elif period == "30 วัน":
-            d_from = (today_dt - timedelta(days=29)).strftime('%Y-%m-%d')
-            d_to = today_dt.strftime('%Y-%m-%d')
-        elif period == "90 วัน":
-            d_from = (today_dt - timedelta(days=89)).strftime('%Y-%m-%d')
-            d_to = today_dt.strftime('%Y-%m-%d')
+
+        if preset == "7 วัน":
+            default_from = today_dt - timedelta(days=6)
+            default_to = today_dt
+        elif preset == "30 วัน":
+            default_from = today_dt - timedelta(days=29)
+            default_to = today_dt
+        elif preset == "90 วัน":
+            default_from = today_dt - timedelta(days=89)
+            default_to = today_dt
         else:
-            d_from, d_to = None, None
+            default_from = today_dt - timedelta(days=29)
+            default_to = today_dt
+
+        # --- Date range picker ---
+        col_from, col_to = st.columns(2)
+        with col_from:
+            sel_from = st.date_input("📅 วันที่เริ่มต้น", value=default_from,
+                                     max_value=today_dt, key="hist_from")
+        with col_to:
+            sel_to = st.date_input("📅 วันที่สิ้นสุด", value=default_to,
+                                   max_value=today_dt, key="hist_to")
+
+
+        if sel_from > sel_to:
+            st.warning("⚠️ วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด")
+            return
+
+        d_from = sel_from.strftime('%Y-%m-%d')
+        d_to = sel_to.strftime('%Y-%m-%d')
 
         _render_historical_analytics(d_from, d_to)
 

@@ -1488,16 +1488,44 @@ def _tab_summary():
     # SUB-TAB 2: สรุปยอดสถิติ (สะสม)
     # =============================================
     with sub_stats:
-        period = st.selectbox("ช่วงเวลา", ["7 วัน", "30 วัน", "ทั้งหมด"],
-                              index=2, key='sum_period')
-        if period == "7 วัน":
-            d_from = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-        elif period == "30 วัน":
-            d_from = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-        else:
-            d_from = None
+        today_dt = datetime.now().date()
 
-        s_all = get_summary(date_from=d_from, date_to=today)
+        # --- Quick preset buttons ---
+        preset = st.radio(
+            "ช่วงเวลา", ["7 วัน", "30 วัน", "90 วัน", "กำหนดเอง"],
+            horizontal=True, key='sum_period', label_visibility='collapsed',
+        )
+
+        if preset == "7 วัน":
+            default_from = today_dt - timedelta(days=6)
+            default_to = today_dt
+        elif preset == "30 วัน":
+            default_from = today_dt - timedelta(days=29)
+            default_to = today_dt
+        elif preset == "90 วัน":
+            default_from = today_dt - timedelta(days=89)
+            default_to = today_dt
+        else:
+            default_from = today_dt - timedelta(days=29)
+            default_to = today_dt
+
+        # --- Date range picker ---
+        col_from, col_to = st.columns(2)
+        with col_from:
+            sel_from = st.date_input("📅 วันที่เริ่มต้น", value=default_from,
+                                     max_value=today_dt, key="stats_from")
+        with col_to:
+            sel_to = st.date_input("📅 วันที่สิ้นสุด", value=default_to,
+                                   max_value=today_dt, key="stats_to")
+
+        if sel_from > sel_to:
+            st.warning("⚠️ วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด")
+            return
+
+        d_from = sel_from.strftime('%Y-%m-%d')
+        d_to = sel_to.strftime('%Y-%m-%d')
+
+        s_all = get_summary(date_from=d_from, date_to=d_to)
 
         # --- Section: ในเวลา ---
         st.markdown(
@@ -1521,8 +1549,10 @@ def _tab_summary():
             unsafe_allow_html=True,
         )
         df_all_cases = get_cases()
-        if d_from:
-            df_all_cases = df_all_cases[df_all_cases['op_date'] >= d_from]
+        df_all_cases = df_all_cases[
+            (df_all_cases['op_date'] >= d_from) &
+            (df_all_cases['op_date'] <= d_to)
+        ]
         _render_after_hours_summary(df_all_cases, prefix="stats")
 
         st.markdown("---")
