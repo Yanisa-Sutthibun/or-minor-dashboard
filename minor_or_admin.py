@@ -12,6 +12,7 @@ from minor_or_db import (
     get_room_status, get_kpi, get_delay_alerts, get_workload,
     get_summary, get_nurse_stats, div_name, DIV_CODE_MAP,
     get_historical_analytics, export_cases_csv, export_summary_excel, get_cases,
+    get_wait_stats, get_handover_stats,
 )
 import numpy as np
 
@@ -525,6 +526,86 @@ def _render_historical_analytics(date_from: str, date_to: str):
     else:
         st.caption("ยังไม่มีข้อมูลหัตถการ")
 
+    # -- Wait time + Handover trends --
+    col_wt, col_ho = st.columns(2)
+
+    with col_wt:
+        st.markdown('<div class="section-title">⏱️ เวลารอผู้ป่วย</div>', unsafe_allow_html=True)
+        wt = get_wait_stats(date_from, date_to)
+        # KPI row
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("เฉลี่ยรอ", f"{wt['avg_all']} นาที")
+        with m2:
+            st.metric("นานสุด", f"{int(wt['max_all'])} นาที")
+        with m3:
+            st.metric("รอ >60 นาที", f"{wt['over_60']} เคส")
+        # Chart: avg wait per day
+        dw = wt['daily_wait']
+        if not dw.empty:
+            dw = dw.copy()
+            dw['date_label'] = pd.to_datetime(dw['op_date']).dt.strftime('%d/%m')
+            fig = px.line(dw, x='date_label', y='avg_wait',
+                          labels={'date_label': 'วันที่', 'avg_wait': 'เฉลี่ย (นาที)'},
+                          markers=True, color_discrete_sequence=['#e53935'])
+            fig.add_hline(y=60, line_dash='dash', line_color='#c62828',
+                          annotation_text='60 นาที')
+            fig.update_layout(margin=dict(t=10, b=40, l=40, r=10), height=240,
+                              xaxis=dict(tickangle=-45))
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Table: long wait cases
+        lw = wt['long_wait_cases']
+        if not lw.empty:
+            with st.expander(f"📋 รายชื่อรอเกิน 60 นาที ({len(lw)} เคส)"):
+                show_cols = ['op_date', 'name', 'procedure_name', 'wait_min']
+                col_rename = {'op_date': 'วันที่', 'name': 'ชื่อ',
+                              'procedure_name': 'หัตถการ', 'wait_min': 'รอ (นาที)'}
+                if 'division_name' in lw.columns:
+                    show_cols.insert(3, 'division_name')
+                    col_rename['division_name'] = 'สาขา'
+                st.dataframe(lw[show_cols].rename(columns=col_rename),
+                             use_container_width=True, hide_index=True)
+
+    with col_ho:
+        st.markdown('<div class="section-title">🔄 สถิติรับเวร (หลัง 15:30)</div>',
+                    unsafe_allow_html=True)
+        ho = get_handover_stats(date_from, date_to)
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("เคสรับเวร", f"{ho['n_handover']} เคส")
+        with m2:
+            st.metric("จากทั้งหมด", f"{ho['total']} เคส")
+        with m3:
+            st.metric("สัดส่วน", f"{ho['pct']}%")
+        # Chart: handover per day
+        dh = ho['daily_handover']
+        if not dh.empty:
+            dh = dh.copy()
+            dh['date_label'] = pd.to_datetime(dh['op_date']).dt.strftime('%d/%m')
+            fig = px.bar(dh, x='date_label', y='n_handover',
+                         labels={'date_label': 'วันที่', 'n_handover': 'เคสรับเวร'},
+                         color_discrete_sequence=['#ef6c00'])
+            fig.update_layout(margin=dict(t=10, b=40, l=40, r=10), height=240,
+                              xaxis=dict(tickangle=-45))
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Table: handover cases
+        hc = ho['handover_cases']
+        if not hc.empty:
+            with st.expander(f"📋 รายชื่อเคสรับเวร ({len(hc)} เคส)"):
+                show_cols = ['op_date', 'name', 'procedure_name', 'status', 'discharged_at']
+                col_rename = {'op_date': 'วันที่', 'name': 'ชื่อ',
+                              'procedure_name': 'หัตถการ', 'status': 'สถานะ',
+                              'discharged_at': 'เวลา discharge'}
+                if 'division_name' in hc.columns:
+                    show_cols.insert(3, 'division_name')
+                    col_rename['division_name'] = 'สาขา'
+                st.dataframe(hc[show_cols].rename(columns=col_rename),
+                             use_container_width=True, hide_index=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
     # -- Export --
     st.markdown('<div class="section-title">💾 Export ข้อมูล</div>', unsafe_allow_html=True)
     st.caption("ดาวน์โหลดข้อมูลสำหรับผู้บริหารหรือวิทยานิพนธ์")
@@ -646,6 +727,7 @@ def page_admin():
         rooms = get_room_status(op_date)
         _render_room_cards(rooms)
 
+
         _thai_months = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
         _today_dt = datetime.now()
         _thai_date = f"{_today_dt.day} {_thai_months[_today_dt.month]} {_today_dt.year + 543}"
@@ -682,6 +764,72 @@ def page_admin():
 
         with st.expander("🤖 AI Prediction Accuracy (สำหรับวิจัย)", expanded=False):
             _render_ai_accuracy(op_date)
+
+        # =========================================================
+        # Section: สถิติรับเวร (วันนี้)
+        # =========================================================
+        st.markdown('<div class="section-title">🔄 สถิติรับเวร (หลัง 15:30 น.)</div>',
+                    unsafe_allow_html=True)
+        ho_today = get_handover_stats(op_date, op_date)
+        if ho_today['n_handover'] > 0:
+            st.markdown(f"""
+            <div style="background:#fff3e0;border-left:4px solid #ef6c00;
+                        padding:10px 14px;border-radius:6px;margin-bottom:8px;">
+                <span style="font-weight:700;color:#e65100;">
+                    {ho_today['n_handover']} เคส</span>
+                <span style="color:#666;font-size:13px;">
+                    จากทั้งหมด {ho_today['total']} เคส
+                    ({ho_today['pct']}%) — ยังไม่ discharge ก่อน 15:30 น.</span>
+            </div>""", unsafe_allow_html=True)
+            ho_df = ho_today['handover_cases']
+            for _, r in ho_df.iterrows():
+                dc_time = ''
+                if r.get('discharged_at'):
+                    dc_time = r['discharged_at'][11:16]
+                    lbl = f"discharge {dc_time}"
+                else:
+                    lbl = f"สถานะ: {r['status']}"
+                st.markdown(f"""
+                <div style="background:var(--bg-secondary-color,#f5f5f5);
+                            border-radius:6px;padding:8px 12px;margin:4px 0;
+                            font-size:13px;border:1px solid var(--border-color,#e0e0e0);">
+                    <b>{r.get('name','')}</b> — {r.get('procedure_name','')}
+                    <span style="float:right;color:#ef6c00;font-weight:600;">{lbl}</span>
+                </div>""", unsafe_allow_html=True)
+        else:
+            st.success("ไม่มีเคสรับเวรวันนี้ — ทุกเคส discharge ก่อน 15:30 น.")
+
+        # =========================================================
+        # Section: ผู้ป่วยรอนาน (วันนี้)
+        # =========================================================
+        st.markdown('<div class="section-title">⏱️ ผู้ป่วยรอนานเกิน 60 นาที</div>',
+                    unsafe_allow_html=True)
+        wt_today = get_wait_stats(op_date, op_date)
+        if wt_today['over_60'] > 0:
+            st.markdown(f"""
+            <div style="background:#fce4ec;border-left:4px solid #c62828;
+                        padding:10px 14px;border-radius:6px;margin-bottom:8px;">
+                <span style="font-weight:700;color:#c62828;">
+                    {wt_today['over_60']} เคส</span>
+                <span style="color:#666;font-size:13px;">
+                    รอเกิน 60 นาที — เฉลี่ยรอ {wt_today['avg_all']} นาที,
+                    นานสุด {wt_today['max_all']} นาที</span>
+            </div>""", unsafe_allow_html=True)
+            wt_df = wt_today['long_wait_cases']
+            for _, r in wt_df.iterrows():
+                st.markdown(f"""
+                <div style="background:var(--bg-secondary-color,#f5f5f5);
+                            border-radius:6px;padding:8px 12px;margin:4px 0;
+                            font-size:13px;border:1px solid var(--border-color,#e0e0e0);">
+                    <b>{r.get('name','')}</b> — {r.get('procedure_name','')}
+                    <span style="float:right;color:#c62828;font-weight:600;">
+                        รอ {int(r['wait_min'])} นาที</span>
+                </div>""", unsafe_allow_html=True)
+        else:
+            if wt_today['total'] > 0:
+                st.success(f"ไม่มีเคสรอเกิน 60 นาที — เฉลี่ยรอ {wt_today['avg_all']} นาที")
+            else:
+                st.info("ยังไม่มีข้อมูลเวลารอ")
 
         # =========================================================
         # Section: เคสนอกเวลา
@@ -739,4 +887,11 @@ def page_admin():
         d_from = sel_from.strftime('%Y-%m-%d')
         d_to = sel_to.strftime('%Y-%m-%d')
 
-     
+        _render_historical_analytics(d_from, d_to)
+
+    # Auto refresh hint
+    st.markdown("""
+    <div style="text-align:center;margin-top:24px;padding:8px;color:#9e9e9e;font-size:11px;">
+        💡 กด <b>R</b> หรือ <b>F5</b> เพื่อรีเฟรชข้อมูล
+    </div>
+    """, unsafe_allow_html=True)

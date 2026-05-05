@@ -1452,6 +1452,121 @@ def export_cases_csv(date_from=None, date_to=None):
 
 
 # ---------------------------------------------------------------------------
+# Wait-time statistics
+# ---------------------------------------------------------------------------
+def get_wait_stats(date_from: str = None, date_to: str = None) -> dict:
+    """สถิติเวลารอ — เคสรอเกิน 60 นาที, avg wait per day, top wait days."""
+    conn = get_conn()
+    where_parts, params = ["patient_type != 'นอกเวลา'", "wait_min IS NOT NULL", "wait_min > 0"], []
+    if date_from:
+        where_parts.append("op_date >= ?"); params.append(date_from)
+    if date_to:
+        where_parts.append("op_date <= ?"); params.append(date_to)
+    where_sql = " AND ".join(where_parts)
+
+    # 1) เคสรอเกิน 60 นาที
+    long_wait = pd.read_sql_query(f"""
+        SELECT case_id, op_date, name, hn, procedure_name, surgeon_name,
+               division_code, room_no, wait_min
+        FROM cases WHERE {where_sql} AND wait_min > 60
+        ORDER BY wait_min DESC
+    """, conn, params=params)
+    if not long_wait.empty and 'division_code' in long_wait.columns:
+        long_wait['division_name'] = long_wait['division_code'].apply(div_name)
+
+    # 2) avg wait per day
+    daily_wait = pd.read_sql_query(f"""
+        SELECT op_date,
+               ROUND(AVG(wait_min), 1) AS avg_wait,
+               MAX(wait_min) AS max_wait,
+               COUNT(*) AS n_cases
+        FROM cases WHERE {where_sql}
+        GROUP BY op_date ORDER BY op_date
+    """, conn, params=params)
+
+    # 3) overall stats
+    overall = pd.read_sql_query(f"""
+        SELECT ROUND(AVG(wait_min), 1) AS avg_all,
+               MAX(wait_min) AS max_all,
+               COUNT(*) AS total,
+               SUM(CASE WHEN wait_min > 60 THEN 1 ELSE 0 END) AS over_60
+        FROM cases WHERE {where_sql}
+    """, conn, params=params)
+
+    conn.close()
+    row = overall.iloc[0] if not overall.empty else {}
+    return {
+        'long_wait_cases': long_wait,
+        'daily_wait': daily_wait,
+        'avg_all': row.get('avg_all', 0) or 0,
+        'max_all': row.get('max_all', 0) or 0,
+        'total': int(row.get('total', 0) or 0),
+        'over_60': int(row.get('over_60', 0) or 0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Handover statistics  (เคสที่ยังไม่ discharge ณ 15:30 น.)
+# ---------------------------------------------------------------------------
+def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
+    """สถิติรับเวร — เคสที่ discharged หลัง 15:30 หรือไม่ได้ discharge ในวันนั้น."""
+    conn = get_conn()
+    where_parts = ["patient_type != 'นอกเวลา'"]
+    params = []
+    if date_from:
+        where_parts.append("op_date >= ?"); params.append(date_from)
+    if date_to:
+        where_parts.append("op_date <= ?"); params.append(date_to)
+    where_sql = " AND ".join(where_parts)
+
+    # เคสรับเวร = discharged หลัง 15:30 หรือ status ไม่ใช่ discharged/cancelled
+    handover_cases = pd.read_sql_query(f"""
+        SELECT case_id, op_date, name, hn, procedure_name, surgeon_name,
+               division_code, room_no, status,
+               arrived_at, in_or_at, op_end_at, discharged_at
+        FROM cases
+        WHERE {where_sql}
+          AND (
+              (discharged_at IS NOT NULL AND SUBSTR(discharged_at, 12, 5) > '15:30')
+              OR (status NOT IN ('discharged', 'cancelled') AND op_date < DATE('now'))
+          )
+        ORDER BY op_date DESC, discharged_at DESC
+    """, conn, params=params)
+    if not handover_cases.empty and 'division_code' in handover_cases.columns:
+        handover_cases['division_name'] = handover_cases['division_code'].apply(div_name)
+
+    # สรุปรายวัน
+    daily_handover = pd.read_sql_query(f"""
+        SELECT op_date,
+               COUNT(*) AS n_handover
+        FROM cases
+        WHERE {where_sql}
+          AND (
+              (discharged_at IS NOT NULL AND SUBSTR(discharged_at, 12, 5) > '15:30')
+              OR (status NOT IN ('discharged', 'cancelled') AND op_date < DATE('now'))
+          )
+        GROUP BY op_date ORDER BY op_date
+    """, conn, params=params)
+
+    # จำนวนเคสทั้งหมดในช่วง (ไม่รวม cancelled)
+    total_row = pd.read_sql_query(f"""
+        SELECT COUNT(*) AS total
+        FROM cases WHERE {where_sql} AND status != 'cancelled'
+    """, conn, params=params)
+
+    conn.close()
+    total = int(total_row.iloc[0]['total']) if not total_row.empty else 0
+    n_handover = int(handover_cases.shape[0])
+    return {
+        'handover_cases': handover_cases,
+        'daily_handover': daily_handover,
+        'n_handover': n_handover,
+        'total': total,
+        'pct': round(n_handover / total * 100, 1) if total > 0 else 0,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Excel export wrapper — delegate to minor_or_export.py
 # ---------------------------------------------------------------------------
 def export_summary_excel(date_from=None, date_to=None) -> bytes:
