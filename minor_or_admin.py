@@ -554,19 +554,6 @@ def _render_historical_analytics(date_from: str, date_to: str):
                               xaxis=dict(tickangle=-45))
             st.plotly_chart(fig, use_container_width=True)
 
-        # Table: long wait cases
-        lw = wt['long_wait_cases']
-        if not lw.empty:
-            with st.expander(f"📋 รายชื่อรอเกิน 60 นาที ({len(lw)} เคส)"):
-                show_cols = ['op_date', 'name', 'procedure_name', 'wait_min']
-                col_rename = {'op_date': 'วันที่', 'name': 'ชื่อ',
-                              'procedure_name': 'หัตถการ', 'wait_min': 'รอ (นาที)'}
-                if 'division_name' in lw.columns:
-                    show_cols.insert(3, 'division_name')
-                    col_rename['division_name'] = 'สาขา'
-                st.dataframe(lw[show_cols].rename(columns=col_rename),
-                             use_container_width=True, hide_index=True)
-
     with col_ho:
         st.markdown('<div class="section-title">🔄 สถิติรับเวร (หลัง 15:30)</div>',
                     unsafe_allow_html=True)
@@ -815,16 +802,6 @@ def page_admin():
                     รอเกิน 60 นาที — เฉลี่ยรอ {wt_today['avg_all']} นาที,
                     นานสุด {wt_today['max_all']} นาที</span>
             </div>""", unsafe_allow_html=True)
-            wt_df = wt_today['long_wait_cases']
-            for _, r in wt_df.iterrows():
-                st.markdown(f"""
-                <div style="background:var(--bg-secondary-color,#f5f5f5);
-                            border-radius:6px;padding:8px 12px;margin:4px 0;
-                            font-size:13px;border:1px solid var(--border-color,#e0e0e0);">
-                    <b>{r.get('name','')}</b> — {r.get('procedure_name','')}
-                    <span style="float:right;color:#c62828;font-weight:600;">
-                        รอ {int(r['wait_min'])} นาที</span>
-                </div>""", unsafe_allow_html=True)
         else:
             if wt_today['total'] > 0:
                 st.success(f"ไม่มีเคสรอเกิน 60 นาที — เฉลี่ยรอ {wt_today['avg_all']} นาที")
