@@ -1318,177 +1318,178 @@ def _render_summary_section(s, label, key_prefix):
         st.info("ยังไม่มีเคสที่ผ่าเสร็จ + มีค่า AI ทำนาย — กด 'ผ่าเสร็จ' เพื่อเริ่มเก็บสถิติ")
 
 
+def _render_after_hours_summary(df_cases, prefix=""):
+    """แสดง section สรุปนอกเวลา (จำนวน + รายได้ + แพทย์)."""
+    if df_cases is None or df_cases.empty:
+        st.info("ไม่มีเคสนอกเวลา")
+        return
+
+    aft = df_cases[df_cases['patient_type'] == 'นอกเวลา'].copy()
+    if aft.empty:
+        st.info("ไม่มีเคสนอกเวลา")
+        return
+
+    n_total = len(aft)
+    n_done = len(aft[aft['status'] == 'discharged'])
+    n_cancel = len(aft[aft['status'] == 'cancelled'])
+    revenue = int(aft['treatment_cost'].fillna(0).sum())
+
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("เคสนอกเวลา", n_total)
+    a2.metric("ยืนยันแล้ว", n_done)
+    a3.metric("ยกเลิก", n_cancel)
+    a4.metric("💰 รายได้", f"{revenue:,} ฿")
+
+    # Top procedures
+    done_aft = aft[aft['status'] == 'discharged']
+    if not done_aft.empty:
+        st.markdown("**หัตถการนอกเวลาที่ทำ**")
+        proc_counts = done_aft['procedure_name'].str.upper().value_counts().head(5)
+        for proc_name, n in proc_counts.items():
+            st.markdown(f"- {proc_name} — {n} ราย")
+
+        # Top doctors
+        surg_counts = done_aft['surgeon_name'].value_counts().head(5)
+        if not surg_counts.empty:
+            st.markdown("**แพทย์นอกเวลา**")
+            for surg, n in surg_counts.items():
+                st.markdown(f"- {surg} — {n} ราย")
+
+
 def _tab_summary():
     today = datetime.now().strftime('%Y-%m-%d')
 
+    # === 2 Sub-tabs ===
+    sub_today, sub_stats = st.tabs(["📋 สรุปยอดวันนี้", "📈 สรุปยอดสถิติ"])
+
     # =============================================
-    # SECTION 1: สรุปยอดวันนี้ + รายการ operation
+    # SUB-TAB 1: สรุปยอดวันนี้
     # =============================================
-    st.markdown('<h3 style="color:#1565c0;">📋 สรุปยอดวันนี้</h3>', unsafe_allow_html=True)
-    s_today = get_summary(date_from=today, date_to=today)
+    with sub_today:
+        s_today = get_summary(date_from=today, date_to=today)
+        df_today = get_cases(op_date=today)
 
-    # Metrics row
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric("เคสทั้งหมด", s_today['total'])
-    r2.metric("ผ่าเสร็จ", s_today['completed'])
-    r3.metric("ยกเลิก", s_today['cancelled'])
-    cancel_rate = s_today['cancelled'] / s_today['total'] * 100 if s_today['total'] > 0 else 0
-    r4.metric("อัตรายกเลิก", "%.0f%%" % cancel_rate)
+        # --- Section: ในเวลา ---
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);'
+            'border-radius:10px;padding:10px 16px;margin:8px 0;">'
+            '<span style="font-size:16px;font-weight:700;color:#2e7d32;">'
+            '🏥 เคสในเวลา</span></div>',
+            unsafe_allow_html=True,
+        )
 
-    r5, r6, r7, r8 = st.columns(4)
-    r5.metric("OPD", s_today['n_opd'])
-    r6.metric("IPD", s_today['n_ipd'])
-    r7.metric("เคสนัดหมาย", s_today['n_set'])
-    r8.metric("Walk-in", s_today['n_walkin'])
+        # Metrics
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("เคสทั้งหมด", s_today['total'])
+        r2.metric("ผ่าเสร็จ", s_today['completed'])
+        r3.metric("ยกเลิก", s_today['cancelled'])
+        cancel_rate = s_today['cancelled'] / s_today['total'] * 100 if s_today['total'] > 0 else 0
+        r4.metric("อัตรายกเลิก", "%.0f%%" % cancel_rate)
 
-    # Revenue + patho row
-    rv1, rv2, rv3, rv4 = st.columns(4)
-    rv1.metric("💰 ค่าหัตถการ", f"{s_today['total_treatment']:,} ฿")
-    rv2.metric("💵 รายได้รวม", f"{s_today['total_revenue']:,} ฿")
-    rv3.metric("🧬 ส่งชิ้นเนื้อ", f"{s_today['n_patho_sent']} ราย")
-    rv4.metric("🔬 ค่าชิ้นเนื้อ", f"{s_today['total_patho']:,} ฿")
+        r5, r6, r7, r8 = st.columns(4)
+        r5.metric("OPD", s_today['n_opd'])
+        r6.metric("IPD", s_today['n_ipd'])
+        r7.metric("เคสนัดหมาย", s_today['n_set'])
+        r8.metric("Walk-in", s_today['n_walkin'])
 
-    # --- After-hours stats (แยกนอกเวลา) ---
-    n_after = s_today.get('n_after', 0)
-    if n_after > 0:
+        # Revenue
+        rv1, rv2, rv3, rv4 = st.columns(4)
+        rv1.metric("💰 ค่าหัตถการ", f"{s_today['total_treatment']:,} ฿")
+        rv2.metric("💵 รายได้รวม", f"{s_today['total_revenue']:,} ฿")
+        rv3.metric("🧬 ส่งชิ้นเนื้อ", f"{s_today['n_patho_sent']} ราย")
+        rv4.metric("🔬 ค่าชิ้นเนื้อ", f"{s_today['total_patho']:,} ฿")
+
+        # Charts (in-hours only)
+        if not df_today.empty:
+            df_in = df_today[(df_today['status'] != 'cancelled') &
+                             (df_today['patient_type'] != 'นอกเวลา')].copy()
+
+            if not df_in.empty:
+                st.markdown("---")
+                pc1, pc2 = st.columns(2)
+                with pc1:
+                    st.markdown("#### หัตถการวันนี้")
+                    proc_counts = df_in['procedure_name'].str.upper().value_counts()
+                    for proc_name, n in proc_counts.items():
+                        st.markdown(f"**{proc_name}** — {n} ราย")
+                with pc2:
+                    st.markdown("#### สาขาที่ set วันนี้")
+                    div_counts = df_in['division_code'].apply(div_name).value_counts().reset_index()
+                    div_counts.columns = ['สาขา', 'จำนวน']
+                    fig_div = px.pie(div_counts, names='สาขา', values='จำนวน', hole=0.35)
+                    fig_div.update_layout(margin=dict(t=10, b=10, l=10, r=10),
+                                          height=300, showlegend=True,
+                                          legend=dict(font=dict(size=11)))
+                    fig_div.update_traces(textposition='inside', textinfo='value+label')
+                    st.plotly_chart(fig_div, use_container_width=True)
+
+                st.markdown("---")
+
+                # Scatter: ช่วงเวลาผ่าตัด
+                st.markdown("#### ช่วงเวลาผ่าตัด (เช้า / บ่าย)")
+                df_time = df_in.copy()
+                if 'in_or_at' in df_time.columns:
+                    df_time['_time'] = df_time['in_or_at'].fillna(df_time.get('arrived_at'))
+                elif 'arrived_at' in df_time.columns:
+                    df_time['_time'] = df_time['arrived_at']
+                else:
+                    df_time['_time'] = None
+                df_time = df_time[df_time['_time'].notna()].copy()
+                if not df_time.empty:
+                    df_time['เวลาเข้าห้อง'] = pd.to_datetime(df_time['_time'])
+                    df_time['ชั่วโมง'] = df_time['เวลาเข้าห้อง'].dt.hour + df_time['เวลาเข้าห้อง'].dt.minute / 60
+                    df_time['ช่วงเวลา'] = df_time['ชั่วโมง'].apply(
+                        lambda h: 'เช้า (08-12)' if h < 12 else 'บ่าย (12-16)')
+                    df_time['proc_upper'] = df_time['procedure_name'].str.upper()
+
+                    fig_sc = px.scatter(df_time, x='ชั่วโมง', y='proc_upper',
+                                        color='ช่วงเวลา',
+                                        color_discrete_map={
+                                            'เช้า (08-12)': '#1976d2',
+                                            'บ่าย (12-16)': '#e65100'},
+                                        labels={'proc_upper': 'หัตถการ'},
+                                        hover_data=['surgeon_name'])
+                    h_min = max(7, int(df_time['ชั่วโมง'].min()) - 1)
+                    h_max = min(24, int(df_time['ชั่วโมง'].max()) + 1)
+                    fig_sc.update_layout(
+                        height=max(280, len(df_time['proc_upper'].unique()) * 50),
+                        margin=dict(t=10, b=30, l=10, r=10),
+                        xaxis=dict(range=[h_min, h_max], dtick=1, title='เวลา (ชั่วโมง)'),
+                        yaxis=dict(title=''),
+                        showlegend=True)
+                    fig_sc.update_traces(marker=dict(size=18, line=dict(width=1, color='white')))
+                    st.plotly_chart(fig_sc, use_container_width=True)
+                    mc = (df_time['ชั่วโมง'] < 12).sum()
+                    ac = (df_time['ชั่วโมง'] >= 12).sum()
+                    st.caption(f"เช้า {mc} ราย | บ่าย {ac} ราย")
+
+                st.markdown("---")
+                # Top 5 แพทย์
+                st.markdown("#### Top 5 แพทย์ที่ set มากสุด")
+                surg_counts = df_in['surgeon_name'].value_counts().head(5)
+                for i, (surg, n) in enumerate(surg_counts.items()):
+                    medal = ["🥇", "🥈", "🥉", "4.", "5."][i]
+                    st.markdown(f"**{medal} {surg}** — {n} ราย")
+
         st.markdown("")
+        st.markdown("")
+
+        # --- Section: นอกเวลา ---
         st.markdown(
             '<div style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);'
             'border-radius:10px;padding:10px 16px;margin:8px 0;">'
-            '<span style="font-size:14px;font-weight:700;color:#c62828;">'
-            '🌙 เคสนอกเวลาวันนี้</span></div>',
+            '<span style="font-size:16px;font-weight:700;color:#c62828;">'
+            '🌙 เคสนอกเวลา</span></div>',
             unsafe_allow_html=True,
         )
-        af1, af2 = st.columns(2)
-        af1.metric("จำนวนเคสนอกเวลา", n_after)
-        # Get after-hours revenue from today's cases
-        df_aft_today = get_cases(op_date=today)
-        if not df_aft_today.empty:
-            aft_cases = df_aft_today[df_aft_today['patient_type'] == 'นอกเวลา']
-            aft_revenue = int(aft_cases['treatment_cost'].fillna(0).sum())
-            aft_done = len(aft_cases[aft_cases['status'] == 'discharged'])
-            aft_cancel = len(aft_cases[aft_cases['status'] == 'cancelled'])
-            af2.metric("รายได้นอกเวลา", f"{aft_revenue:,} ฿")
-            af3, af4 = st.columns(2)
-            af3.metric("ยืนยันแล้ว", aft_done)
-            af4.metric("ยกเลิก", aft_cancel)
-
-    st.markdown("---")
-
-    # Charts + data
-    df_today = get_cases(op_date=today)
-    if not df_today.empty:
-        df_active = df_today[df_today['status'] != 'cancelled'].copy()
-
-        if not df_active.empty:
-            # --- หัตถการวันนี้ (text) + Pie สาขา ---
-            pc1, pc2 = st.columns(2)
-
-            with pc1:
-                st.markdown("#### หัตถการวันนี้")
-                proc_counts = df_active['procedure_name'].str.upper().value_counts()
-                for proc_name, n in proc_counts.items():
-                    st.markdown(f"**{proc_name}** — {n} ราย")
-
-            with pc2:
-                st.markdown("#### สาขาที่ set วันนี้")
-                div_counts = df_active['division_code'].apply(div_name).value_counts().reset_index()
-                div_counts.columns = ['สาขา', 'จำนวน']
-                fig_div = px.pie(div_counts, names='สาขา', values='จำนวน',
-                                 hole=0.35)
-                fig_div.update_layout(margin=dict(t=10, b=10, l=10, r=10),
-                                      height=300, showlegend=True,
-                                      legend=dict(font=dict(size=11)))
-                fig_div.update_traces(textposition='inside', textinfo='value+label')
-                st.plotly_chart(fig_div, use_container_width=True)
-
-            st.markdown("---")
-
-            # --- Scatter: ช่วงเวลาผ่าตัด ---
-            st.markdown("#### ช่วงเวลาผ่าตัด (เช้า / บ่าย)")
-            df_time = df_active.copy()
-            # ใช้ in_or_at ก่อน ถ้าไม่มีใช้ arrived_at
-            if 'in_or_at' in df_time.columns:
-                df_time['_time'] = df_time['in_or_at'].fillna(df_time.get('arrived_at'))
-            elif 'arrived_at' in df_time.columns:
-                df_time['_time'] = df_time['arrived_at']
-            else:
-                df_time['_time'] = None
-            df_time = df_time[df_time['_time'].notna()].copy()
-            if not df_time.empty:
-                df_time['เวลาเข้าห้อง'] = pd.to_datetime(df_time['_time'])
-                df_time['ชั่วโมง'] = df_time['เวลาเข้าห้อง'].dt.hour + df_time['เวลาเข้าห้อง'].dt.minute / 60
-                df_time['ช่วงเวลา'] = df_time['ชั่วโมง'].apply(
-                    lambda h: 'เช้า (08-12)' if h < 12 else 'บ่าย (12-16)')
-                df_time['proc_upper'] = df_time['procedure_name'].str.upper()
-
-
-                fig_sc = px.scatter(df_time, x='ชั่วโมง', y='proc_upper',
-                                    color='ช่วงเวลา',
-                                    color_discrete_map={
-                                        'เช้า (08-12)': '#1976d2',
-                                        'บ่าย (12-16)': '#e65100'},
-                                    labels={'proc_upper': 'หัตถการ'},
-                                    hover_data=['surgeon_name'])
-                h_min = max(7, int(df_time['ชั่วโมง'].min()) - 1)
-                h_max = min(24, int(df_time['ชั่วโมง'].max()) + 1)
-                fig_sc.update_layout(
-                    height=max(280, len(df_time['proc_upper'].unique()) * 50),
-                    margin=dict(t=10, b=30, l=10, r=10),
-                    xaxis=dict(range=[h_min, h_max],
-                               dtick=1, title='เวลา (ชั่วโมง)'),
-                    yaxis=dict(title=''),
-                    showlegend=True)
-                fig_sc.update_traces(marker=dict(size=18, line=dict(width=1, color='white')))
-                st.plotly_chart(fig_sc, use_container_width=True)
-
-                mc = (df_time['ชั่วโมง'] < 12).sum()
-                ac = (df_time['ชั่วโมง'] >= 12).sum()
-                st.caption(f"เช้า {mc} ราย | บ่าย {ac} ราย")
-            else:
-                st.info("ยังไม่มีเคสเข้าห้องผ่าตัด")
-
-            st.markdown("---")
-
-            # --- Top 5 ---
-            st.markdown("#### Top 5 แพทย์ที่ set มากสุด")
-            surg_counts = df_active['surgeon_name'].value_counts().head(5)
-            for i, (surg, n) in enumerate(surg_counts.items()):
-                medal = ["🥇", "🥈", "🥉", "4.", "5."][i]
-                st.markdown(f"**{medal} {surg}** — {n} ราย")
-
-        n_cancel = len(df_today[df_today['status'] == 'cancelled'])
-        if n_cancel > 0:
-            st.caption(f"❌ ยกเลิก {n_cancel} ราย")
-    else:
-        st.info("ยังไม่มีเคสวันนี้")
-
-    st.markdown("")
-    st.markdown("")
+        _render_after_hours_summary(df_today, prefix="today")
 
     # =============================================
-    # SECTION 2
-    # =============================================
-    st.markdown('<h3 style="color:#2e7d32; margin-top:40px;">📈 สรุปยอดสะสม</h3>', unsafe_allow_html=True)
 
-    period = st.selectbox("ช่วงเวลา", ["7 วัน", "30 วัน", "ทั้งหมด"],
-                          index=2, key='sum_period')
-    if period == "7 วัน":
-        d_from = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-    elif period == "30 วัน":
-        d_from = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    else:
-        d_from = None
-
-    s_all = get_summary(date_from=d_from, date_to=today)
-    _render_summary_section(s_all, "สะสม", "all")
-
-    st.markdown("---")
-
-    # ---- Download ----
-    if s_all['total'] > 0:
-        df_all = get_cases()
-        csv_data = df_all.to_csv(index=False).encode('utf-8-sig')
-        st.download_button('📥 ดาวน์โหลดข้อมูลทั้งหมด (CSV)', csv_data,
-                           'minor_or_cases.csv', 'text/csv',
-                           use_container_width=True)
+        # ---- Download ----
+        if s_all['total'] > 0:
+            df_export = get_cases()
+            csv_data = df_export.to_csv(index=False).encode('utf-8-sig')
+            st.download_button('📥 ดาวน์โหลดข้อมูลทั้งหมด (CSV)', csv_data,
+                               'minor_or_cases.csv', 'text/csv',
+                               use_container_width=True)
