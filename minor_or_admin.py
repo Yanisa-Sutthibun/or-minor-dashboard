@@ -864,7 +864,12 @@ def page_admin():
         d_from = sel_from.strftime('%Y-%m-%d')
         d_to = sel_to.strftime('%Y-%m-%d')
 
-        _render_historical_analytics(d_from, d_to)
+        if st.button("📊 แสดงสถิติ", type="primary", use_container_width=True, key="btn_show_hist"):
+            st.session_state['hist_show'] = True
+            st.session_state['hist_range'] = (d_from, d_to)
+
+        if st.session_state.get('hist_show') and st.session_state.get('hist_range'):
+            _render_historical_analytics(*st.session_state['hist_range'])
 
     # Auto refresh hint
     st.markdown("""
