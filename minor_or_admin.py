@@ -289,9 +289,40 @@ def _render_ai_accuracy(op_date: str = None):
     st.plotly_chart(fig, use_container_width=True)
 
 
+_NURSE_PIN = 'muke'
+
+
 def _render_nurse_progress(op_date: str):
-    """แสดงสถิติพยาบาล — Novice Nurse Progress Tracking."""
-    # เลือกช่วงเวลา: วันนี้ / 7 วัน / 30 วัน / ทั้งหมด
+    """Progress รายบุคคล — ล็อคด้วย PIN."""
+
+    # ---- PIN Lock ----
+    if not st.session_state.get('nurse_unlocked'):
+        st.markdown(
+            '<div style="background:#f5f5f5;border-radius:10px;padding:16px;'
+            'text-align:center;margin:8px 0;">'
+            '<span style="font-size:24px;">🔒</span><br>'
+            '<span style="font-size:14px;color:#616161;font-weight:600;">'
+            'Nurse Progress — ต้องใส่รหัสเพื่อดู</span></div>',
+            unsafe_allow_html=True,
+        )
+        pc1, pc2 = st.columns([3, 1])
+        with pc1:
+            pin_input = st.text_input("รหัส PIN", type="password",
+                                       key="nurse_pin_input",
+                                       placeholder="กรอก PIN")
+        with pc2:
+            st.markdown('<div style="height:28px;"></div>', unsafe_allow_html=True)
+            if st.button("🔓 ปลดล็อค", key="nurse_unlock_btn",
+                         use_container_width=True):
+                if pin_input == _NURSE_PIN:
+                    st.session_state['nurse_unlocked'] = True
+                    st.rerun()
+                else:
+                    st.error("❌ PIN ไม่ถูกต้อง")
+        return
+
+    # ---- Unlocked: show Progress รายบุคคล ----
+    # เลือกช่วงเวลา
     period = st.radio("ช่วงเวลา", ["วันนี้", "7 วัน", "30 วัน", "ทั้งหมด"],
                       horizontal=True, key="nurse_period", label_visibility='collapsed')
     from datetime import timedelta
@@ -311,84 +342,47 @@ def _render_nurse_progress(op_date: str):
     cases_df = ns['nurse_cases']
 
     if summary.empty:
-        st.info("ยังไม่มีข้อมูลพยาบาล — เลือกพยาบาล Scrub/Circ ตอนกดเข้าห้องผ่าตัดในหน้า Tracking")
+        st.info("ยังไม่มีข้อมูลพยาบาล")
         return
 
-    # ---- Summary cards per nurse ----
-    for _, nurse in summary.iterrows():
-        name = nurse['nurse_name']
-        total = int(nurse['total_cases'])
-        n_scrub = int(nurse['n_scrub'])
-        n_circ = int(nurse['n_circ'])
-        n_procs = int(nurse['unique_procedures'])
-        avg_dur = nurse['avg_duration']
-        avg_txt = f"{avg_dur:.0f} นาที" if pd.notna(avg_dur) else "-"
-
-        # Scrub vs Circ ratio bar
-        scrub_pct = int(n_scrub / total * 100) if total > 0 else 0
-        circ_pct = 100 - scrub_pct
-
-        st.markdown(f"""
-        <div style="background:white;border-radius:12px;padding:14px 18px;margin:8px 0;
-                    box-shadow:0 1px 4px rgba(0,0,0,.06);border-left:4px solid #5c6bc0;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <span style="font-size:15px;font-weight:700;color:#283593;">👩‍⚕️ {name}</span>
-                    <span style="font-size:12px;color:#9e9e9e;margin-left:8px;">
-                        {nurse['first_date'] if nurse['first_date'] != nurse['last_date'] else ''}{(' — ' + nurse['last_date']) if nurse['first_date'] != nurse['last_date'] else nurse['first_date']}</span>
-                </div>
-                <div style="font-size:22px;font-weight:700;color:#283593;">{total} <span style="font-size:12px;color:#999;">เคส</span></div>
-            </div>
-            <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;">
-                <span style="background:#e8eaf6;padding:3px 10px;border-radius:12px;color:#3949ab;">
-                    🧤 Scrub {n_scrub}</span>
-                <span style="background:#e0f2f1;padding:3px 10px;border-radius:12px;color:#00695c;">
-                    📋 Circ {n_circ}</span>
-                <span style="color:#666;">หัตถการ {n_procs} ชนิด</span>
-                <span style="color:#666;">เฉลี่ย {avg_txt}</span>
-            </div>
-            <div style="display:flex;margin-top:6px;border-radius:4px;overflow:hidden;height:6px;">
-                <div style="background:#5c6bc0;width:{scrub_pct}%;"></div>
-                <div style="background:#26a69a;width:{circ_pct}%;"></div>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:10px;color:#999;margin-top:2px;">
-                <span>Scrub {scrub_pct}%</span><span>Circ {circ_pct}%</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ---- Detail table (expandable) ----
-    with st.expander("📋 รายละเอียดเคสทั้งหมด", expanded=False):
-        if not cases_df.empty:
-            display_df = cases_df[['nurse_name', 'role', 'op_date', 'procedure_name',
-                                    'surgeon_name', 'actual_duration_min', 'room_no']].copy()
-            display_df.columns = ['พยาบาล', 'ตำแหน่ง', 'วันที่', 'หัตถการ',
-                                  'แพทย์', 'เวลาจริง (นาที)', 'ห้อง']
-            display_df['สาขา'] = cases_df['division_code'].apply(div_name)
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-    # ---- Nurse filter for individual progress ----
+    # ---- Progress รายบุคคล ----
     nurse_names = sorted(summary['nurse_name'].tolist())
-    if len(nurse_names) > 1:
-        with st.expander("🔍 ดู Progress รายบุคคล", expanded=False):
-            sel_nurse = st.selectbox("เลือกพยาบาล", nurse_names, key="sel_nurse_detail")
-            individual = cases_df[cases_df['nurse_name'] == sel_nurse].copy()
-            if not individual.empty:
-                # Procedure breakdown
-                proc_counts = individual.groupby(['procedure_name', 'role']).size().reset_index(name='n')
-                st.markdown(f"**{sel_nurse}** — หัตถการที่เคยทำ:")
-                for _, p in proc_counts.iterrows():
-                    role_icon = '🧤' if p['role'] == 'Scrub' else '📋'
-                    st.markdown(f"- {role_icon} **{p['procedure_name']}** × {p['n']} ครั้ง ({p['role']})")
+    sel_nurse = st.selectbox("เลือกพยาบาล", nurse_names, key="sel_nurse_detail")
+    individual = cases_df[cases_df['nurse_name'] == sel_nurse].copy()
+    if not individual.empty:
+        total = len(individual)
+        n_scrub = len(individual[individual['role'] == 'Scrub'])
+        n_circ = len(individual[individual['role'] == 'Circ'])
+        n_procs = individual['procedure_name'].nunique()
 
-                # Timeline chart
-                daily = individual.groupby('op_date').size().reset_index(name='n')
-                if len(daily) > 1:
-                    fig = px.bar(daily, x='op_date', y='n',
-                                 labels={'op_date': 'วันที่', 'n': 'จำนวนเคส'},
-                                 color_discrete_sequence=['#5c6bc0'])
-                    fig.update_layout(margin=dict(t=10, b=30, l=40, r=10), height=200)
-                    st.plotly_chart(fig, use_container_width=True)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("เคสทั้งหมด", total)
+        m2.metric("🧤 Scrub", n_scrub)
+        m3.metric("📋 Circ", n_circ)
+        m4.metric("หัตถการ", f"{n_procs} ชนิด")
+
+        # Procedure breakdown
+        proc_counts = individual.groupby(['procedure_name', 'role']).size().reset_index(name='n')
+        st.markdown(f"**{sel_nurse}** — หัตถการที่เคยทำ:")
+        for _, p in proc_counts.iterrows():
+            role_icon = '🧤' if p['role'] == 'Scrub' else '📋'
+            st.markdown(f"- {role_icon} **{p['procedure_name']}** × {p['n']} ครั้ง ({p['role']})")
+
+        # Timeline chart
+        daily = individual.groupby('op_date').size().reset_index(name='n')
+        if len(daily) > 1:
+            fig = px.bar(daily, x='op_date', y='n',
+                         labels={'op_date': 'วันที่', 'n': 'จำนวนเคส'},
+                         color_discrete_sequence=['#5c6bc0'])
+            fig.update_layout(margin=dict(t=10, b=30, l=40, r=10), height=200)
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("ยังไม่มีข้อมูลสำหรับพยาบาลที่เลือก")
+
+    # Lock button
+    if st.button("🔒 ล็อคอีกครั้ง", key="nurse_lock_btn"):
+        st.session_state['nurse_unlocked'] = False
+        st.rerun()
 
 
 # ============================================================================
@@ -670,7 +664,7 @@ def page_admin():
         wl = get_workload(op_date)
         _render_workload(wl)
 
-        st.markdown('<div class="section-title">👩‍⚕️ สถิติพยาบาล — Nurse Progress</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🔍 Progress รายบุคคล</div>', unsafe_allow_html=True)
         _render_nurse_progress(op_date)
 
         with st.expander("🤖 AI Prediction Accuracy (สำหรับวิจัย)", expanded=False):
