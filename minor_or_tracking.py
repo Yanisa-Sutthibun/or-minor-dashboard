@@ -609,7 +609,7 @@ def _render_actions(cid, status, row=None):
                         ["🛗 รับส่ง", "🛏️ ห้องพักฟื้น"],
                         index=0, horizontal=True, key=f"dest_{cid}",
                         label_visibility='collapsed')
-        b1, b2 = st.columns(2)
+        b1, b2, b3 = st.columns(3)
         with b1:
             if st.button("✅ ผ่าเสร็จแล้ว", key=f"opend_{cid}",
                          type='primary', use_container_width=True):
@@ -621,6 +621,10 @@ def _render_actions(cid, status, row=None):
                          use_container_width=True):
                 update_case(cid, status='arrived', in_or_at=None)
                 st.rerun()
+        with b3:
+            if st.button("❌ ยกเลิก", key=f"canc_{cid}",
+                         use_container_width=True):
+                st.session_state[f'cancelling_{cid}'] = True
 
     elif status == 'post_op':
         dest_val = row.get('post_op_dest', 'transfer') if row is not None else 'transfer'
@@ -700,7 +704,7 @@ def _render_actions(cid, status, row=None):
                     update_case(cid, **updates)
                     st.success("✅ บันทึกเรียบร้อย")
 
-        b1, b2 = st.columns(2)
+        b1, b2, b3 = st.columns(3)
         with b1:
             if st.button(f"🏠 Discharge ({datetime.now().strftime('%H:%M')} น.)",
                          key=f"dc_{cid}", type='primary', use_container_width=True):
@@ -712,20 +716,23 @@ def _render_actions(cid, status, row=None):
                 update_case(cid, status='in_or', op_end_at=None,
                             actual_duration_min=None, post_op_dest=None)
                 st.rerun()
+        with b3:
+            if st.button("❌ ยกเลิก", key=f"canc_{cid}",
+                         use_container_width=True):
+                st.session_state[f'cancelling_{cid}'] = True
 
     # Cancel confirmation dialog
     if st.session_state.get(f'cancelling_{cid}'):
-        reason = st.text_input("เหตุผล (ไม่กรอกก็ได้)", key=f"cr_{cid}",
-                               placeholder="เช่น ผู้ป่วยไม่มา, เลื่อนนัด")
+        st.warning(f"⚠️ ยืนยันยกเลิกเคส **{row.get('patient_name','')}** — {row.get('procedure_name','')} ?")
         cc1, cc2 = st.columns(2)
         with cc1:
-            if st.button("ยืนยันยกเลิก", key=f"cc_{cid}",
+            if st.button("✅ ยืนยันยกเลิก", key=f"cc_{cid}",
                          type='primary', use_container_width=True):
-                cancel_case(cid, reason if reason else None)
+                cancel_case(cid)
                 del st.session_state[f'cancelling_{cid}']
                 st.rerun()
         with cc2:
-            if st.button("ไม่ยกเลิก", key=f"cx_{cid}",
+            if st.button("↩️ ไม่ใช่", key=f"cx_{cid}",
                          use_container_width=True):
                 del st.session_state[f'cancelling_{cid}']
                 st.rerun()
