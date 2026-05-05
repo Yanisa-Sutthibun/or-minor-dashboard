@@ -226,6 +226,9 @@ def init_db():
     # Backfill AI predictions for cases that don't have one yet
     _backfill_ai_predictions(conn)
 
+    # Fix negative durations from timezone bug
+    _fix_negative_durations(conn)
+
     conn.close()
 
 
@@ -469,6 +472,46 @@ def _backfill_ai_predictions(conn):
         if ai_min is not None:
             conn.execute("UPDATE cases SET ai_predicted_min=? WHERE case_id=?",
                          (ai_min, cid))
+    conn.commit()
+
+
+def _fix_negative_durations(conn):
+    """Fix negative actual_duration_min and wait_min caused by timezone bug.
+    Recalculate from stored timestamps (in_or_at - arrived_at, op_end_at - in_or_at)."""
+    # Fix actual_duration_min
+    rows = conn.execute(
+        "SELECT case_id, in_or_at, op_end_at FROM cases "
+        "WHERE actual_duration_min IS NOT NULL AND actual_duration_min < 0 "
+        "AND in_or_at IS NOT NULL AND op_end_at IS NOT NULL"
+    ).fetchall()
+    for r in rows:
+        try:
+            ior = datetime.strptime(r['in_or_at'], '%Y-%m-%d %H:%M:%S')
+            end = datetime.strptime(r['op_end_at'], '%Y-%m-%d %H:%M:%S')
+            dur = int((end - ior).total_seconds() / 60)
+            if dur >= 0:
+                conn.execute("UPDATE cases SET actual_duration_min=? WHERE case_id=?",
+                             (dur, r['case_id']))
+        except Exception:
+            pass
+
+    # Fix wait_min
+    rows2 = conn.execute(
+        "SELECT case_id, arrived_at, in_or_at FROM cases "
+        "WHERE wait_min IS NOT NULL AND wait_min < 0 "
+        "AND arrived_at IS NOT NULL AND in_or_at IS NOT NULL"
+    ).fetchall()
+    for r in rows2:
+        try:
+            arr = datetime.strptime(r['arrived_at'], '%Y-%m-%d %H:%M:%S')
+            ior = datetime.strptime(r['in_or_at'], '%Y-%m-%d %H:%M:%S')
+            wait = int((ior - arr).total_seconds() / 60)
+            if wait >= 0:
+                conn.execute("UPDATE cases SET wait_min=? WHERE case_id=?",
+                             (wait, r['case_id']))
+        except Exception:
+            pass
+
     conn.commit()
 
 
