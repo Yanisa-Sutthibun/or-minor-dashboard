@@ -11,7 +11,7 @@ from datetime import timedelta
 from minor_or_db import (
     get_room_status, get_kpi, get_delay_alerts, get_workload,
     get_summary, get_nurse_stats, div_name, DIV_CODE_MAP,
-    get_historical_analytics, export_cases_csv,
+    get_historical_analytics, export_cases_csv, get_cases,
 )
 import numpy as np
 
@@ -557,6 +557,50 @@ def _render_historical_analytics(date_from: str, date_to: str):
             st.caption("ไม่มีข้อมูลให้ export")
 
 
+def _render_after_hours_admin(op_date: str):
+    """แสดงสรุปเคสนอกเวลาในหน้า Admin."""
+    df = get_cases(op_date=op_date)
+    if df.empty:
+        st.info("ไม่มีเคสนอกเวลา")
+        return
+
+    aft = df[df['patient_type'] == 'นอกเวลา'].copy()
+    if aft.empty:
+        st.info("ไม่มีเคสนอกเวลา")
+        return
+
+    n_total = len(aft)
+    n_done = len(aft[aft['status'] == 'discharged'])
+    n_cancel = len(aft[aft['status'] == 'cancelled'])
+    n_pending = n_total - n_done - n_cancel
+    revenue = int(aft['treatment_cost'].fillna(0).sum())
+
+    # Metrics
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("เคสนอกเวลา", n_total)
+    a2.metric("ยืนยันแล้ว", n_done)
+    a3.metric("ยกเลิก", n_cancel)
+    a4.metric("💰 รายได้", f"{revenue:,} ฿")
+
+    if n_pending > 0:
+        st.caption(f"⏳ รอดำเนินการ {n_pending} เคส")
+
+    # Top procedures
+    done_aft = aft[aft['status'] == 'discharged']
+    if not done_aft.empty:
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.markdown("**หัตถการนอกเวลา**")
+            proc_counts = done_aft['procedure_name'].str.upper().value_counts().head(5)
+            for proc_name, n in proc_counts.items():
+                st.markdown(f"- {proc_name} — {n} ราย")
+        with col_r:
+            st.markdown("**แพทย์นอกเวลา**")
+            surg_counts = done_aft['surgeon_name'].value_counts().head(5)
+            for surg, n in surg_counts.items():
+                st.markdown(f"- {surg} — {n} ราย")
+
+
 def page_admin():
     """หน้าบริหารจัดการ — สำหรับหัวหน้าพยาบาล / ผู้บริหาร."""
     st.markdown(_ADMIN_CSS, unsafe_allow_html=True)
@@ -580,6 +624,19 @@ def page_admin():
         with st.expander("📅 เลือกวันที่", expanded=False):
             sel_date = st.date_input("วันที่", value=datetime.now().date(), key="admin_date")
             op_date = sel_date.strftime('%Y-%m-%d')
+
+        # =========================================================
+        # Section: เคสในเวลา
+        # =========================================================
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);'
+            'border-radius:10px;padding:10px 16px;margin:12px 0 8px;">'
+            '<span style="font-size:16px;font-weight:700;color:#2e7d32;">'
+            '🏥 เคสในเวลา</span>'
+            '<span style="font-size:12px;color:#388e3c;margin-left:8px;">'
+            'Full OR Flow + AI Prediction</span></div>',
+            unsafe_allow_html=True,
+        )
 
         st.markdown('<div class="section-title">🏥 สถานะห้องผ่าตัด</div>', unsafe_allow_html=True)
         rooms = get_room_status(op_date)
@@ -618,6 +675,22 @@ def page_admin():
 
         with st.expander("🤖 AI Prediction Accuracy (สำหรับวิจัย)", expanded=False):
             _render_ai_accuracy(op_date)
+
+        # =========================================================
+        # Section: เคสนอกเวลา
+        # =========================================================
+        st.markdown("")
+        st.markdown("")
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);'
+            'border-radius:10px;padding:10px 16px;margin:12px 0 8px;">'
+            '<span style="font-size:16px;font-weight:700;color:#c62828;">'
+            '🌙 เคสนอกเวลา</span>'
+            '<span style="font-size:12px;color:#d32f2f;margin-left:8px;">'
+            'ยืนยัน / ยกเลิก เท่านั้น</span></div>',
+            unsafe_allow_html=True,
+        )
+        _render_after_hours_admin(op_date)
 
     # -- TAB 2: Historical analytics --
     with tab_history:
