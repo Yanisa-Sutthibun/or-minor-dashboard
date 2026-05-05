@@ -646,7 +646,10 @@ def page_admin():
         rooms = get_room_status(op_date)
         _render_room_cards(rooms)
 
-        st.markdown('<div class="section-title">📈 ตัวเลขสำคัญ</div>', unsafe_allow_html=True)
+        _thai_months = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+        _today_dt = datetime.now()
+        _thai_date = f"{_today_dt.day} {_thai_months[_today_dt.month]} {_today_dt.year + 543}"
+        st.markdown(f'<div class="section-title">📈 ตัวเลขสำคัญ — {_thai_date}</div>', unsafe_allow_html=True)
         kpi = get_kpi(op_date)
         _render_kpi(kpi)
 
@@ -654,7 +657,7 @@ def page_admin():
             progress = kpi['done'] / kpi['total']
             st.markdown(f"""
             <div style="margin:12px 0 4px;">
-                <div style="display:flex;justify-content:space-between;font-size:12px;color:#666;">
+                <div style="display:flex;justify-content:space-between;font-size:13px;color:#333;font-weight:700;">
                     <span>ความคืบหน้าวันนี้</span>
                     <span>{kpi['done']}/{kpi['total']} เคส ({progress:.0%})</span>
                 </div>
@@ -736,11 +739,4 @@ def page_admin():
         d_from = sel_from.strftime('%Y-%m-%d')
         d_to = sel_to.strftime('%Y-%m-%d')
 
-        _render_historical_analytics(d_from, d_to)
-
-    # Auto refresh hint
-    st.markdown("""
-    <div style="text-align:center;margin-top:24px;padding:8px;color:#9e9e9e;font-size:11px;">
-        💡 กด <b>R</b> หรือ <b>F5</b> เพื่อรีเฟรชข้อมูล
-    </div>
-    """, unsafe_allow_html=True)
+     
