@@ -618,7 +618,9 @@ def add_walkin_case(op_date, name, hn, procedure, surgeon, division,
 # ============================================================================
 
 def _now():
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    from datetime import timezone, timedelta as _td
+    _TH = timezone(_td(hours=7))
+    return datetime.now(_TH).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def _log_prediction(conn, case_id, procedure, surgeon, predicted, actual):
