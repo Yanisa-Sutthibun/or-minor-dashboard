@@ -86,6 +86,56 @@ OR_NURSE_LIST = [
 ]
 
 
+# ============================================================================
+# Price CSV — Fuzzy Lookup
+# ============================================================================
+
+import os as _os
+
+@st.cache_data(ttl=3600)
+def _load_price_csv():
+    """Load or_minor_price.csv → list of dicts."""
+    csv_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'or_minor_price.csv')
+    if not _os.path.exists(csv_path):
+        return []
+    df = pd.read_csv(csv_path)
+    return df.to_dict('records')
+
+
+def _fuzzy_price_lookup(procedure_name: str):
+    """Fuzzy match procedure name against price CSV.
+    Returns list of matching dicts: [{procedure_name, procedure_name_th, new_price_thb}, ...]
+    """
+    prices = _load_price_csv()
+    if not prices or not procedure_name:
+        return []
+    p = procedure_name.strip().upper()
+
+    # 1. Exact match
+    exact = [r for r in prices if r['procedure_name'].strip().upper() == p]
+    if exact:
+        return exact
+
+    # 2. Keyword contain — procedure_name from CSV is contained in input, or vice versa
+    contains = []
+    for r in prices:
+        csv_name = r['procedure_name'].strip().upper()
+        if csv_name in p or p in csv_name:
+            contains.append(r)
+    if contains:
+        return contains
+
+    # 3. First-word / keyword group match — extract first word from input
+    first_word = p.split()[0] if p.split() else ''
+    if first_word and len(first_word) >= 3:
+        group = [r for r in prices if r['procedure_name'].strip().upper().startswith(first_word)]
+        if group:
+            return group
+
+    # 4. No match
+    return []
+
+
 _NONE_LABEL = '— ไม่ระบุ —'
 _SKIP_VALUES = {_NONE_LABEL}
 
@@ -781,44 +831,55 @@ def _render_actions(cid, status, row=None):
         # แก้หัตถการ + ค่ารักษา (เฉพาะ transfer = ห้องรับส่ง)
         if dest_val == 'transfer':
             with st.expander("💰 แก้ไขหัตถการ / ค่ารักษา", expanded=False):
-                cur_proc = (row['procedure_name'] or '').strip().upper()
-
-                # Dropdown เลือกหัตถการ + พิมพ์เองได้
-                proc_list = list(PROCEDURE_COSTS.keys())
-                if cur_proc and cur_proc not in proc_list:
-                    proc_list.append(cur_proc)
-                proc_list.sort()
-                proc_list.append("อื่นๆ (พิมพ์เอง)")
-
-                sel_idx = 0
-                if cur_proc in proc_list:
-                    sel_idx = proc_list.index(cur_proc)
-
-                sel_proc = st.selectbox("หัตถการ", proc_list,
-                                        index=sel_idx, key=f"selproc_{cid}")
-
-                if sel_proc == "อื่นๆ (พิมพ์เอง)":
-                    new_proc = st.text_input("พิมพ์ชื่อหัตถการ",
-                                             value=cur_proc, key=f"eproc_{cid}")
-                else:
-                    new_proc = sel_proc
-
-                # --- ค่าหัตถการ: เลือกจากปุ่ม ---
-                cost_options = lookup_cost(new_proc)
+                cur_proc = (row['procedure_name'] or '').strip()
                 cur_cost = int(row.get('treatment_cost') or 0)
 
-                if cost_options:
-                    default_idx = 0
-                    if cur_cost in cost_options:
-                        default_idx = cost_options.index(cur_cost)
-                    st.markdown("**ค่าหัตถการ (บาท)**")
-                    cost1 = st.radio(
-                        "เลือกราคา", cost_options,
-                        format_func=lambda x: f"{x:,} บาท",
-                        index=default_idx, horizontal=True,
-                        key=f"cost_radio_{cid}", label_visibility="collapsed",
-                    )
+                # --- Fuzzy price lookup จาก CSV ---
+                matches = _fuzzy_price_lookup(cur_proc)
+
+                new_proc = cur_proc  # default
+
+                if len(matches) == 1:
+                    # ราคาเดียว — auto-fill
+                    m = matches[0]
+                    st.markdown(f"**หัตถการ:** {cur_proc}")
+                    st.markdown(
+                        f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
+                        f'border-radius:12px;font-size:12px;">match: {m["procedure_name"]}</span>',
+                        unsafe_allow_html=True)
+                    cost1 = int(m['new_price_thb'])
+                    st.markdown(f"**ค่าหัตถการ: {cost1:,} บาท**")
+
+                elif len(matches) > 1:
+                    # หลายราคา — dropdown ให้เลือก
+                    st.markdown(f"**หัตถการ:** {cur_proc}")
+                    st.markdown(
+                        f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
+                        f'border-radius:12px;font-size:12px;">พบ {len(matches)} รายการ</span>',
+                        unsafe_allow_html=True)
+                    options_display = [
+                        f"{r['procedure_name_th']} — {int(r['new_price_thb']):,} ฿"
+                        for r in matches
+                    ]
+                    # Find default index if current cost matches
+                    default_sel = 0
+                    for i, r in enumerate(matches):
+                        if int(r['new_price_thb']) == cur_cost:
+                            default_sel = i
+                            break
+                    sel = st.selectbox("เลือกรายการ", options_display,
+                                       index=default_sel, key=f"pricepick_{cid}")
+                    sel_idx = options_display.index(sel)
+                    cost1 = int(matches[sel_idx]['new_price_thb'])
+                    new_proc = matches[sel_idx]['procedure_name']
+
                 else:
+                    # ไม่เจอ — พิมพ์เอง
+                    st.markdown(f"**หัตถการ:** {cur_proc}")
+                    st.markdown(
+                        '<span style="background:#fff3e0;color:#e65100;padding:2px 8px;'
+                        'border-radius:12px;font-size:12px;">ไม่พบราคาอัตโนมัติ</span>',
+                        unsafe_allow_html=True)
                     cost1 = st.number_input("ค่าหัตถการ (บาท)", min_value=0,
                                             value=cur_cost, step=100, key=f"cost_{cid}")
 
@@ -848,7 +909,7 @@ def _render_actions(cid, status, row=None):
                         'treatment_cost': cost1,
                         'patho_cost': patho_val,
                     }
-                    if new_proc.strip().upper() != cur_proc:
+                    if new_proc.strip().upper() != cur_proc.strip().upper():
                         updates['procedure_name'] = new_proc.strip()
                     update_case(cid, **updates)
                     st.success("✅ บันทึกเรียบร้อย")

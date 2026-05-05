@@ -1,0 +1,67 @@
+procedure_name,procedure_name_th,new_price_thb
+Excision,Excision,2500
+I&D,I&D,2000
+Off Perm Catheter,Off Perm Catheter,1800
+Electrocauterization (Wart on sole),Electrocauterization จี้ตาปลา,300
+Debridement,Debridement,2500
+Suture Wound,Suture Wound,2000
+Frenolotomy,Frenolotomy,1600
+Partial/Total Nail Extraction,Partial/Total Nail Extraction,1300
+Circumcision,Circumcision,2500
+Lymphnode Biopsy,Lymphnode Biopsy,2500
+DLC UV Permanent/Double Lumen,DLC UV Permanent/Double Lumen,2000
+SSV Ligation & Foam Sclerotherapy,SSV Ligation & Foam Sclerotherapy,8000
+Vasectomy,Vasectomy,2500
+Upper Blepharoplasty,Upper Blepharoplasty,6000
+Lower Blepharoplasty,Lower Blepharoplasty,6000
+Rhinoplasty (excl. silicone),Rhinoplasty (ไม่รวมซิลิโคน),10000
+Vacuum Dressing,Vacuum Dressing,2500
+Electrocauterization (Wart),Electrocauterization จี้หูด,2000
+Release Trigger,Release Trigger,2500
+Mini Face Lift,Mini Face Lift,6000
+Remove Foreign Body,Remove FB,2500
+Ligation,Ligation,2000
+Change Jejunostomy,Change Jejunostomy,2000
+Helios3 Test Spot (<1 sq.cm.),Helios3 Test Spot น้อยกว่า 1 ตร.ซม.,1000
+Helios3 1-10 sq.cm.,Helios3 1-10 ตร.ซม.,1500
+Helios3 11-25 sq.cm.,Helios3 11-25 ตร.ซม.,3000
+Helios3 26-50 sq.cm.,Helios3 26-50 ตร.ซม.,4000
+Helios3 51-75 sq.cm.,Helios3 51-75 ตร.ซม.,5000
+Helios3 76-100 sq.cm.,Helios3 76-100 ตร.ซม.,6000
+Helios3 101-125 sq.cm.,Helios3 101-125 ตร.ซม.,7000
+Helios3 126-150 sq.cm.,Helios3 126-150 ตร.ซม.,8000
+Helios3 >150 sq.cm.,Helios3 มากกว่า 150 ตร.ซม.,9000
+Smaz <150 shots,Smaz น้อยกว่า 150 shot,2000
+Smaz 151-200 shots,Smaz 151-200 shot,2500
+Smaz 201-250 shots,Smaz 201-250 shot,3000
+Smaz 251-300 shots,Smaz 251-300 shot,4000
+Smaz 301-350 shots,Smaz 301-350 shot,5000
+Smaz 351-400 shots,Smaz 351-400 shot,6000
+Smaz >400 shots,Smaz มากกว่า 400 shot,7000
+Scarlet Full Face Session 1,Scarlet Full Face ครั้งที่ 1,10000
+Scarlet Full Face Session 2,Scarlet Full Face ครั้งที่ 2,3000
+Scarlet Full Face Session 3,Scarlet Full Face ครั้งที่ 3,2000
+Scarlet Half Face Session 1,Scarlet Half Face ครั้งที่ 1,7000
+Scarlet Half Face Session 2,Scarlet Half Face ครั้งที่ 2,2000
+Scarlet Half Face Session 3,Scarlet Half Face ครั้งที่ 3,1000
+Enerjet Session 1,Enerjet ครั้งที่ 1,10000
+Enerjet Session 2,Enerjet ครั้งที่ 2,10000
+Enerjet Session 3,Enerjet ครั้งที่ 3,10000
+EMSCULPT Abdomen/Buttock/Thigh 1zone x1,EMSCULPT หน้าท้อง/กัน/ต้นขา 1จุด 1ครั้ง,6000
+EMSCULPT Abdomen/Buttock/Thigh 1zone x4,EMSCULPT หน้าท้อง/กัน/ต้นขา 1จุด 4ครั้ง,14000
+EMSCULPT Abdomen/Buttock/Thigh 1zone x6,EMSCULPT หน้าท้อง/กัน/ต้นขา 1จุด 6ครั้ง,22000
+EMSCULPT Abdomen/Buttock/Thigh 1zone x8,EMSCULPT หน้าท้อง/กัน/ต้นขา 1จุด 8ครั้ง,29000
+EMSCULPT 2zone x1,EMSCULPT 2จุด 2หัว 1ครั้ง,10000
+EMSCULPT 2zone x4,EMSCULPT 2จุด 2หัว 4ครั้ง,30000
+EMSCULPT 2zone x6,EMSCULPT 2จุด 2หัว 6ครั้ง,45000
+EMSCULPT 2zone x8,EMSCULPT 2จุด 2หัว 8ครั้ง,60000
+Cooltech Size M 1zone,Cooltech ขนาด M 1ตำแหน่ง 1หัว,5000
+Cooltech Size M 2zone,Cooltech ขนาด M 2ตำแหน่ง 2หัว,7000
+Cooltech Size M 4zone,Cooltech ขนาด M 4ตำแหน่ง 4หัว,12500
+Cooltech Size L 1zone,Cooltech ขนาด L 1ตำแหน่ง 1หัว,65000
+ESWL Gov welfare Session 1,ESWL สวัสดิการข้าราชการ ครั้งที่ 1,20000
+ESWL Social security Session 1,ESWL ประกันสังคม ครั้งที่ 1,20000
+ESWL Universal coverage Session 1,ESWL หลักประกันสุขภาพถ้วนหน้า ครั้งที่ 1,20000
+ESWL Gov welfare Session 2,ESWL สวัสดิการข้าราชการ ครั้งที่ 2,10000
+ESWL Social security Session 2,ESWL ประกันสังคม ครั้งที่ 2,10000
+ESWL Universal coverage Session 2,ESWL หลักประกันสุขภาพถ้วนหน้า ครั้งที่ 2,10000
