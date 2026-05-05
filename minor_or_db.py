@@ -623,6 +623,13 @@ def _now():
     return datetime.now(_TH).strftime('%Y-%m-%d %H:%M:%S')
 
 
+def _now_dt():
+    """Return current datetime in Thailand timezone (naive, for diff calculations)."""
+    from datetime import timezone, timedelta as _td
+    _TH = timezone(_td(hours=7))
+    return datetime.now(_TH).replace(tzinfo=None)
+
+
 def _log_prediction(conn, case_id, procedure, surgeon, predicted, actual):
     """Log ML prediction vs actual to prediction_log for research."""
     try:
@@ -682,7 +689,7 @@ def mark_in_or(case_id: int):
         if row and row['arrived_at']:
             try:
                 arr = datetime.strptime(row['arrived_at'], '%Y-%m-%d %H:%M:%S')
-                wait = int((datetime.now() - arr).total_seconds() / 60)
+                wait = int((_now_dt() - arr).total_seconds() / 60)
             except Exception:
                 pass
         conn.execute("""UPDATE cases SET status='in_or', in_or_at=?, wait_min=?, updated_at=?
@@ -700,7 +707,7 @@ def mark_op_end(case_id: int, dest: str = 'transfer'):
         if row and row['in_or_at']:
             try:
                 ior = datetime.strptime(row['in_or_at'], '%Y-%m-%d %H:%M:%S')
-                dur = int((datetime.now() - ior).total_seconds() / 60)
+                dur = int((_now_dt() - ior).total_seconds() / 60)
             except Exception:
                 pass
         conn.execute("""UPDATE cases SET status='post_op', op_end_at=?,
@@ -758,7 +765,7 @@ def get_cases(op_date: str = None, status: str = None) -> pd.DataFrame:
 
 def get_pending_calls(days_back: int = 7) -> pd.DataFrame:
     with db_session() as conn:
-        cutoff = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        cutoff = (_now_dt() - timedelta(days=days_back)).strftime('%Y-%m-%d')
         return pd.read_sql_query("""
             SELECT * FROM cases
             WHERE status='discharged' AND patient_type != 'IPD'
@@ -873,7 +880,7 @@ def get_summary(date_from=None, date_to=None) -> dict:
 
 def get_db_stats() -> dict:
     conn = get_conn()
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = _now_dt().strftime('%Y-%m-%d')
     today_total = conn.execute(
         "SELECT COUNT(*) FROM cases WHERE op_date=?", (today,)).fetchone()[0]
     today_done = conn.execute(
@@ -881,7 +888,7 @@ def get_db_stats() -> dict:
         (today,)).fetchone()[0]
     pending_calls = conn.execute(
         "SELECT COUNT(*) FROM cases WHERE status='discharged' AND patient_type != 'IPD' AND post_call=0 AND op_date >= ?",
-        ((datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'),)).fetchone()[0]
+        ((_now_dt() - timedelta(days=7)).strftime('%Y-%m-%d'),)).fetchone()[0]
     total_all = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
     conn.close()
     return {
@@ -941,7 +948,7 @@ def mark_in_or_with_nurses(case_id: int, scrub_nurse: str = '', circ_nurse: str 
         if row and row['arrived_at']:
             try:
                 arr = datetime.strptime(row['arrived_at'], '%Y-%m-%d %H:%M:%S')
-                wait = int((datetime.now() - arr).total_seconds() / 60)
+                wait = int((_now_dt() - arr).total_seconds() / 60)
             except Exception:
                 pass
         conn.execute("""UPDATE cases SET status='in_or', in_or_at=?, wait_min=?,
@@ -960,7 +967,7 @@ def backup_db() -> str:
     import shutil
     backup_dir = os.path.join(_SCRIPT_DIR, 'backups')
     os.makedirs(backup_dir, exist_ok=True)
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    ts = _now_dt().strftime('%Y%m%d_%H%M%S')
     backup_path = os.path.join(backup_dir, f'minor_or_{ts}.db')
     shutil.copy2(DB_PATH, backup_path)
     # Log it
@@ -1008,7 +1015,7 @@ def get_audit_trail(case_id: int = None) -> pd.DataFrame:
 def get_room_status(op_date: str = None) -> list:
     """สถานะห้องผ่าตัดแต่ละห้อง — ใช้ใน Admin Dashboard."""
     if not op_date:
-        op_date = datetime.now().strftime('%Y-%m-%d')
+        op_date = _now_dt().strftime('%Y-%m-%d')
     conn = get_conn()
     rooms = [1, 3, 4, 5]
     result = []
@@ -1038,7 +1045,7 @@ def get_room_status(op_date: str = None) -> list:
 def get_kpi(op_date: str = None) -> dict:
     """KPI วันนี้ — จำนวนเคส, utilization, turnover time."""
     if not op_date:
-        op_date = datetime.now().strftime('%Y-%m-%d')
+        op_date = _now_dt().strftime('%Y-%m-%d')
     conn = get_conn()
 
     total = conn.execute("SELECT COUNT(*) FROM cases WHERE op_date=? AND status != 'cancelled'",
@@ -1096,9 +1103,9 @@ def get_kpi(op_date: str = None) -> dict:
 def get_delay_alerts(op_date: str = None) -> list:
     """เคสที่มีปัญหา / delay — ใช้ใน Admin Dashboard."""
     if not op_date:
-        op_date = datetime.now().strftime('%Y-%m-%d')
+        op_date = _now_dt().strftime('%Y-%m-%d')
     conn = get_conn()
-    now = datetime.now()
+    now = _now_dt()
     alerts = []
 
     # 1) เคสที่อยู่ in_or นานเกิน predicted + 30%
@@ -1172,7 +1179,7 @@ def get_delay_alerts(op_date: str = None) -> list:
 def get_workload(op_date: str = None) -> dict:
     """ภาระงาน — Top แพทย์, สาขา, SET/Walk-in, ประเภทผู้ป่วย."""
     if not op_date:
-        op_date = datetime.now().strftime('%Y-%m-%d')
+        op_date = _now_dt().strftime('%Y-%m-%d')
     conn = get_conn()
     w = "WHERE op_date=? AND status != 'cancelled'"
     p = [op_date]
