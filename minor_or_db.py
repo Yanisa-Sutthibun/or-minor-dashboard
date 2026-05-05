@@ -888,7 +888,7 @@ def get_summary(date_from=None, date_to=None) -> dict:
     call_ok = 0
     call_miss = 0
 
-    # AI accuracy
+    # AI accuracy — เฉพาะเคสในเวลาเท่านั้น (นอกเวลาไม่มี AI prediction)
     ai_df = pd.read_sql_query(f"""
         SELECT ai_predicted_min, actual_duration_min,
                procedure_name, surgeon_name, division_code
@@ -897,6 +897,7 @@ def get_summary(date_from=None, date_to=None) -> dict:
         AND ai_predicted_min IS NOT NULL
         AND actual_duration_min IS NOT NULL
         AND actual_duration_min > 0
+        AND (patient_type IS NULL OR patient_type != 'นอกเวลา')
     """, conn, params=params)
 
     # Revenue: treatment_cost + patho_cost
@@ -1395,6 +1396,7 @@ def get_historical_analytics(date_from=None, date_to=None):
     div_df = pd.read_sql_query(
         f"SELECT division_code, COUNT(*) as n FROM cases WHERE {where_sql} GROUP BY division_code ORDER BY n DESC",
         conn, params=params)
+    top_div_name, top_div_count, top_div_pct = '-', 0, 0
     top_div_name, top_div_count, top_div_pct = '-', 0, 0
     if not div_df.empty:
         div_df['division_name'] = div_df['division_code'].apply(div_name)

@@ -433,6 +433,9 @@ def _tab_station(view_date_str, station):
             f'<p style="color:#bdbdbd;font-size:13px;">{sub}</p></div>',
             unsafe_allow_html=True,
         )
+        # Walk-in form even when empty (receive only)
+        if station == 'receive':
+            _render_walkin(view_date_str)
     else:
         # Stats bar (always show full picture)
         n_total = len(df)
@@ -473,14 +476,192 @@ def _tab_station(view_date_str, station):
                 mask = mask | (df['status'] == rule)
         filtered = df[mask]
 
-        if filtered.empty:
-            icon, title, sub = _STATION_EMPTY.get(station, ('📂', 'ไม่มีเคส', ''))
-            st.info(title)
-        else:
-            for _, row in filtered.iterrows():
-                _render_case(row)
+        # ---- RECEIVE TAB: แยก ในเวลา / นอกเวลา ----
+        if station == 'receive':
+            in_hours = filtered[filtered['patient_type'] != 'นอกเวลา']
+            after_hours = filtered[filtered['patient_type'] == 'นอกเวลา']
 
-    # Walk-in form moved to top (before case list)
+            # === Section: ในเวลา (full OR flow + AI) ===
+            st.markdown(
+                '<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);'
+                'border-radius:10px;padding:10px 16px;margin:10px 0 6px;">'
+                '<span style="font-size:16px;font-weight:700;color:#2e7d32;">'
+                '🏥 เคสในเวลา</span>'
+                '<span style="font-size:12px;color:#388e3c;margin-left:8px;">'
+                'Full OR Flow + AI Prediction</span></div>',
+                unsafe_allow_html=True,
+            )
+            if in_hours.empty:
+                st.info("ไม่มีเคสในเวลา")
+            else:
+                for _, row in in_hours.iterrows():
+                    _render_case(row)
+
+            st.markdown("")
+            st.markdown("")
+
+            # === Section: นอกเวลา (simplified: ยืนยัน / ยกเลิก) ===
+            st.markdown(
+                '<div style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);'
+                'border-radius:10px;padding:10px 16px;margin:10px 0 6px;">'
+                '<span style="font-size:16px;font-weight:700;color:#c62828;">'
+                '🌙 เคสนอกเวลา</span>'
+                '<span style="font-size:12px;color:#d32f2f;margin-left:8px;">'
+                'ยืนยัน / ยกเลิก เท่านั้น (ไม่เข้า OR Flow)</span></div>',
+                unsafe_allow_html=True,
+            )
+            if after_hours.empty:
+                st.info("ไม่มีเคสนอกเวลา")
+            else:
+                for _, row in after_hours.iterrows():
+                    _render_after_hours_card(row)
+        else:
+            # Non-receive tabs: render normally
+            if filtered.empty:
+                icon, title, sub = _STATION_EMPTY.get(station, ('📂', 'ไม่มีเคส', ''))
+                st.info(title)
+            else:
+                for _, row in filtered.iterrows():
+                    _render_case(row)
+
+
+def _render_after_hours_card(row):
+    """Simplified card for after-hours cases: ยืนยัน (confirm+price) or ยกเลิก only."""
+    cid = int(row['case_id'])
+    status = row['status'] or 'scheduled'
+    name_d = row['name'] or '-'
+    hn_d = row['hn'] or '-'
+    proc_d = row['procedure_name'] or '-'
+    surg_d = row['surgeon_name'] or '-'
+
+    # If already discharged (confirmed) — show green "done" card
+    if status == 'discharged':
+        cost_d = int(row.get('treatment_cost') or 0)
+        st.markdown(f"""
+        <div class="case-card" style="background:#e8f5e9;border-left:5px solid #4caf50;">
+            <div><span class="pill pill-dc">✅ ยืนยันแล้ว</span>
+                 <span class="pill pill-after">นอกเวลา</span></div>
+            <div style="margin-top:6px;">
+                <span class="pt-name">{name_d}</span>
+                <span class="pt-hn">HN: {hn_d}</span>
+            </div>
+            <div class="pt-proc">{proc_d}</div>
+            <div class="pt-meta">แพทย์: {surg_d} · ค่าหัตถการ: {cost_d:,} ฿</div>
+        </div>""", unsafe_allow_html=True)
+        return
+
+    # If cancelled — show faded card
+    if status == 'cancelled':
+        st.markdown(f"""
+        <div class="case-card card-cancelled">
+            <div><span class="pill pill-cancel">❌ ยกเลิก</span>
+                 <span class="pill pill-after">นอกเวลา</span></div>
+            <div style="margin-top:6px;text-decoration:line-through;">
+                <span class="pt-name">{name_d}</span>
+                <span class="pt-hn">HN: {hn_d}</span>
+            </div>
+            <div class="pt-proc" style="text-decoration:line-through;">{proc_d}</div>
+        </div>""", unsafe_allow_html=True)
+        if st.button("🔄 กู้คืนเคส", key=f"aft_restore_{cid}", use_container_width=True):
+            update_case(cid, status='scheduled', cancel_reason=None)
+            st.rerun()
+        return
+
+    # Active card (scheduled/arrived) — show ยืนยัน / ยกเลิก buttons
+    st.markdown(f"""
+    <div class="case-card" style="background:#fff0f3;border-left:5px solid #c62828;">
+        <div><span class="pill pill-after">🌙 นอกเวลา</span></div>
+        <div style="margin-top:6px;">
+            <span class="pt-name">{name_d}</span>
+            <span class="pt-hn">HN: {hn_d}</span>
+        </div>
+        <div class="pt-proc">{proc_d}</div>
+        <div class="pt-meta">แพทย์: {surg_d}</div>
+    </div>""", unsafe_allow_html=True)
+
+    # === ยืนยัน flow (expanded) ===
+    if st.session_state.get(f'aft_confirming_{cid}'):
+        st.markdown("---")
+        st.markdown("**💰 ยืนยันเคส — เลือกราคาค่าหัตถการ**")
+
+        # Fuzzy price lookup
+        matches = _fuzzy_price_lookup(proc_d)
+        cost_val = 0
+
+        if len(matches) == 1:
+            m = matches[0]
+            st.markdown(
+                f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
+                f'border-radius:12px;font-size:12px;">match: {m["procedure_name"]}</span>',
+                unsafe_allow_html=True)
+            cost_val = int(m['new_price_thb'])
+            st.markdown(f"**ค่าหัตถการ: {cost_val:,} บาท**")
+        elif len(matches) > 1:
+            st.markdown(
+                f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
+                f'border-radius:12px;font-size:12px;">พบ {len(matches)} รายการ</span>',
+                unsafe_allow_html=True)
+            options_display = [
+                f"{r['procedure_name_th']} — {int(r['new_price_thb']):,} ฿"
+                for r in matches
+            ]
+            sel = st.selectbox("เลือกรายการ", options_display, key=f"aftpick_{cid}")
+            sel_idx = options_display.index(sel)
+            cost_val = int(matches[sel_idx]['new_price_thb'])
+        else:
+            cost_val = st.number_input("ค่าหัตถการ (บาท)", min_value=0,
+                                        value=0, step=100, key=f"aftcost_{cid}")
+
+        # แพทย์ที่ทำ (editable)
+        aft_surg = st.text_input("แพทย์ที่ทำ", value=surg_d, key=f"aftsurg_{cid}")
+
+        bc1, bc2 = st.columns(2)
+        with bc1:
+            if st.button("✅ ยืนยันบันทึก", key=f"aft_save_{cid}",
+                         type='primary', use_container_width=True):
+                # Save: set status=discharged, treatment_cost, surgeon_name
+                update_case(cid, status='discharged',
+                            treatment_cost=cost_val,
+                            surgeon_name=aft_surg.strip() if aft_surg else surg_d,
+                            discharged_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                if f'aft_confirming_{cid}' in st.session_state:
+                    del st.session_state[f'aft_confirming_{cid}']
+                st.rerun()
+        with bc2:
+            if st.button("↩️ ยกเลิก", key=f"aft_back_{cid}",
+                         use_container_width=True):
+                del st.session_state[f'aft_confirming_{cid}']
+                st.rerun()
+
+    # === ยกเลิก flow (confirm popup) ===
+    elif st.session_state.get(f'aft_cancelling_{cid}'):
+        st.warning(f"⚠️ ยืนยันยกเลิกเคส **{name_d}** — {proc_d} ?")
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            if st.button("✅ ยืนยันยกเลิก", key=f"aft_cc_{cid}",
+                         type='primary', use_container_width=True):
+                cancel_case(cid)
+                del st.session_state[f'aft_cancelling_{cid}']
+                st.rerun()
+        with cc2:
+            if st.button("↩️ ไม่ใช่", key=f"aft_cx_{cid}",
+                         use_container_width=True):
+                del st.session_state[f'aft_cancelling_{cid}']
+                st.rerun()
+
+    # === Default: show 2 buttons ===
+    else:
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("✅ ยืนยัน", key=f"aft_conf_{cid}",
+                         type='primary', use_container_width=True):
+                st.session_state[f'aft_confirming_{cid}'] = True
+                st.rerun()
+        with b2:
+            if st.button("❌ ยกเลิก", key=f"aft_canc_{cid}",
+                         use_container_width=True):
+                st.session_state[f'aft_cancelling_{cid}'] = True
+                st.rerun()
 
 
 def _render_case(row):
@@ -1159,7 +1340,6 @@ def _tab_summary():
     r6.metric("IPD", s_today['n_ipd'])
     r7.metric("เคสนัดหมาย", s_today['n_set'])
     r8.metric("Walk-in", s_today['n_walkin'])
-    r8.metric("Walk-in", s_today['n_walkin'])
 
     # Revenue + patho row
     rv1, rv2, rv3, rv4 = st.columns(4)
@@ -1167,6 +1347,31 @@ def _tab_summary():
     rv2.metric("💵 รายได้รวม", f"{s_today['total_revenue']:,} ฿")
     rv3.metric("🧬 ส่งชิ้นเนื้อ", f"{s_today['n_patho_sent']} ราย")
     rv4.metric("🔬 ค่าชิ้นเนื้อ", f"{s_today['total_patho']:,} ฿")
+
+    # --- After-hours stats (แยกนอกเวลา) ---
+    n_after = s_today.get('n_after', 0)
+    if n_after > 0:
+        st.markdown("")
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);'
+            'border-radius:10px;padding:10px 16px;margin:8px 0;">'
+            '<span style="font-size:14px;font-weight:700;color:#c62828;">'
+            '🌙 เคสนอกเวลาวันนี้</span></div>',
+            unsafe_allow_html=True,
+        )
+        af1, af2 = st.columns(2)
+        af1.metric("จำนวนเคสนอกเวลา", n_after)
+        # Get after-hours revenue from today's cases
+        df_aft_today = get_cases(op_date=today)
+        if not df_aft_today.empty:
+            aft_cases = df_aft_today[df_aft_today['patient_type'] == 'นอกเวลา']
+            aft_revenue = int(aft_cases['treatment_cost'].fillna(0).sum())
+            aft_done = len(aft_cases[aft_cases['status'] == 'discharged'])
+            aft_cancel = len(aft_cases[aft_cases['status'] == 'cancelled'])
+            af2.metric("รายได้นอกเวลา", f"{aft_revenue:,} ฿")
+            af3, af4 = st.columns(2)
+            af3.metric("ยืนยันแล้ว", aft_done)
+            af4.metric("ยกเลิก", aft_cancel)
 
     st.markdown("---")
 
@@ -1254,7 +1459,6 @@ def _tab_summary():
 
         n_cancel = len(df_today[df_today['status'] == 'cancelled'])
         if n_cancel > 0:
-            st.caption(f"❌ ยกเลิก {n_cancel} ราย")
             st.caption(f"❌ ยกเลิก {n_cancel} ราย")
     else:
         st.info("ยังไม่มีเคสวันนี้")
