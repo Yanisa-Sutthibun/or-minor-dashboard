@@ -183,8 +183,9 @@ def page_tracking():
                         st.caption(f"{k} → {v}")
 
     # ---- Tabs ----
-    tab_recv, tab_or, tab_recov, tab_dc, tab_sum = st.tabs([
+    tab_recv, tab_wait, tab_or, tab_recov, tab_dc, tab_sum = st.tabs([
         "🧑 รับผู้ป่วย",
+        "⏳ รอผ่าตัด",
         "🔪 ห้องผ่าตัด",
         "🛏️ ห้องพักฟื้น",
         "🛗 ห้องรับส่ง",
@@ -193,6 +194,8 @@ def page_tracking():
 
     with tab_recv:
         _tab_station(view_date_str, 'receive')
+    with tab_wait:
+        _tab_waiting_room(view_date_str)
     with tab_or:
         _tab_station(view_date_str, 'or')
     with tab_recov:
@@ -201,6 +204,152 @@ def page_tracking():
         _tab_station(view_date_str, 'discharge')
     with tab_sum:
         _tab_summary()
+
+
+# ============================================================================
+# TAB: ห้องรอผ่าตัด — Waiting Room (grouped by OR room)
+# ============================================================================
+
+# Keywords สำหรับจัด room อัตโนมัติ
+_ROOM1_KEYWORDS = ['laser', 'morpheus', 'scaret', 'emsculpt', 'cooltect', 'q-switch',
+                    'q switch', 'qswitch']
+_ROOM3_KEYWORDS = ['eswl']
+
+
+def _assign_waiting_room(procedure_name: str) -> str:
+    """จัดห้องผ่าตัดอัตโนมัติจากชื่อหัตถการ."""
+    if not procedure_name:
+        return 'room45'
+    p = procedure_name.strip().upper()
+    for kw in _ROOM1_KEYWORDS:
+        if kw.upper() in p:
+            return 'room1'
+    for kw in _ROOM3_KEYWORDS:
+        if kw.upper() in p:
+            return 'room3'
+    return 'room45'
+
+
+def _tab_waiting_room(view_date_str):
+    """Tab รอผ่าตัด — แสดงผู้ป่วยที่กดรับแล้ว (arrived) แบ่งตามห้อง."""
+    df = get_cases(op_date=view_date_str)
+
+    if df.empty:
+        st.markdown(
+            '<div style="text-align:center;padding:40px 0;">'
+            '<p style="font-size:48px;">⏳</p>'
+            '<p style="color:#9e9e9e;font-size:16px;">ยังไม่มีผู้ป่วยรอผ่าตัด</p>'
+            '<p style="color:#bdbdbd;font-size:13px;">กด "รับผู้ป่วย" ใน tab แรกก่อน</p></div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Filter เฉพาะ arrived
+    waiting = df[df['status'] == 'arrived'].copy()
+
+    if waiting.empty:
+        st.info("ไม่มีผู้ป่วยรอผ่าตัดขณะนี้")
+        return
+
+    # จัด room
+    waiting['_wait_room'] = waiting['procedure_name'].apply(_assign_waiting_room)
+
+    # Sort by arrived_at (รอนานสุดขึ้นก่อน)
+    waiting = waiting.sort_values('arrived_at', ascending=True, na_position='last')
+
+    # Room definitions
+    rooms = [
+        ('room1', '🔬 ห้องผ่าตัด 1', 'Laser / Morpheus / Scaret / Emsculpt / Cooltect / Q-Switch'),
+        ('room3', '🔧 ห้องผ่าตัด 3', 'ESWL'),
+        ('room45', '🏥 ห้องผ่าตัด 4-5', 'เคสทั่วไป'),
+    ]
+
+    for room_key, room_label, room_desc in rooms:
+        room_df = waiting[waiting['_wait_room'] == room_key]
+        count = len(room_df)
+
+        # Room header
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);'
+            f'border-radius:10px;padding:12px 16px;margin:16px 0 8px;">'
+            f'<span style="font-size:18px;font-weight:700;color:#1565c0;">{room_label}</span>'
+            f'<span style="font-size:13px;color:#1976d2;margin-left:8px;">{room_desc}</span>'
+            f'<span style="float:right;background:#1565c0;color:#fff;border-radius:20px;'
+            f'padding:2px 12px;font-size:14px;font-weight:600;">{count} คน</span></div>',
+            unsafe_allow_html=True,
+        )
+
+        if room_df.empty:
+            st.caption("    — ว่าง —")
+        else:
+            for _, row in room_df.iterrows():
+                _render_waiting_card(row)
+
+        st.markdown("")
+
+
+def _render_waiting_card(row):
+    """แสดง card ผู้ป่วยในห้องรอผ่าตัด พร้อม timer + ปุ่มเข้าห้องผ่าตัด."""
+    cid = int(row['case_id'])
+    name_d = row['name'] or '-'
+    hn_d = row['hn'] or '-'
+    proc_d = row['procedure_name'] or '-'
+    surg_d = row['surgeon_name'] or '-'
+
+    st.markdown(f"""
+    <div class="case-card card-arrived">
+        <div>
+            <span class="pill pill-arrive">⏳ รอผ่าตัด</span>
+        </div>
+        <div style="margin-top:6px;">
+            <span class="pt-name">{name_d}</span>
+            <span class="pt-hn">HN: {hn_d}</span>
+        </div>
+        <div class="pt-proc">{proc_d}</div>
+        <div class="pt-meta">แพทย์: {surg_d}</div>
+    </div>""", unsafe_allow_html=True)
+
+    # Timer
+    if row['arrived_at']:
+        _render_timer(cid, row['arrived_at'])
+
+    # ปุ่ม เข้าห้องผ่าตัด / ยกเลิก
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("🔪 เข้าห้องผ่าตัด", key=f"wait_ior_{cid}",
+                     type='primary', use_container_width=True):
+            rm_no = int(row.get('room_no', 1) or 1)
+            rm_settings = st.session_state.get('room_settings', {}).get(rm_no, {})
+            scrub_raw = rm_settings.get('scrub', [])
+            circ_raw = rm_settings.get('circ', [])
+            if isinstance(scrub_raw, str):
+                scrub_raw = [scrub_raw]
+            if isinstance(circ_raw, str):
+                circ_raw = [circ_raw]
+            auto_scrub = ', '.join(n for n in scrub_raw if n and isinstance(n, str))
+            auto_circ = ', '.join(n for n in circ_raw if n and isinstance(n, str))
+            mark_in_or_with_nurses(cid, auto_scrub, auto_circ)
+            st.rerun()
+    with b2:
+        if st.button("❌ ยกเลิก", key=f"wait_canc_{cid}",
+                     use_container_width=True):
+            st.session_state[f'cancelling_{cid}'] = True
+
+    # Cancel confirmation
+    if st.session_state.get(f'cancelling_{cid}'):
+        st.warning(f"⚠️ ยืนยันยกเลิกเคส **{name_d}** — {proc_d} ?")
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            if st.button("✅ ยืนยันยกเลิก", key=f"wait_cc_{cid}",
+                         type='primary', use_container_width=True):
+                cancel_case(cid)
+                del st.session_state[f'cancelling_{cid}']
+                st.rerun()
+        with cc2:
+            if st.button("↩️ ไม่ใช่", key=f"wait_cx_{cid}",
+                         use_container_width=True):
+                del st.session_state[f'cancelling_{cid}']
+                st.rerun()
 
 
 # ============================================================================
@@ -948,6 +1097,7 @@ def _tab_summary():
     r5.metric("OPD", s_today['n_opd'])
     r6.metric("IPD", s_today['n_ipd'])
     r7.metric("เคสนัดหมาย", s_today['n_set'])
+    r8.metric("Walk-in", s_today['n_walkin'])
     r8.metric("Walk-in", s_today['n_walkin'])
 
     # Revenue + patho row
