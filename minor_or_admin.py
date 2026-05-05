@@ -11,7 +11,7 @@ from datetime import timedelta
 from minor_or_db import (
     get_room_status, get_kpi, get_delay_alerts, get_workload,
     get_summary, get_nurse_stats, div_name, DIV_CODE_MAP,
-    get_historical_analytics, export_cases_csv, get_cases,
+    get_historical_analytics, export_cases_csv, export_summary_excel, get_cases,
 )
 import numpy as np
 
@@ -525,9 +525,9 @@ def _render_historical_analytics(date_from: str, date_to: str):
     else:
         st.caption("ยังไม่มีข้อมูลหัตถการ")
 
-    # -- Export CSV --
+    # -- Export --
     st.markdown('<div class="section-title">💾 Export ข้อมูล</div>', unsafe_allow_html=True)
-    st.caption("ดาวน์โหลดข้อมูลเคสเป็น CSV เพื่อ backup หรือใช้ในวิทยานิพนธ์")
+    st.caption("ดาวน์โหลดข้อมูลสำหรับผู้บริหารหรือวิทยานิพนธ์")
     col_e1, col_e2 = st.columns([1, 3])
     with col_e1:
         export_scope = st.radio("ช่วง export", ["ตามที่เลือก", "ทั้งหมด"],
@@ -535,18 +535,31 @@ def _render_historical_analytics(date_from: str, date_to: str):
                                 label_visibility='collapsed')
     with col_e2:
         if export_scope == "ทั้งหมด":
-            df_export = export_cases_csv()
+            exp_from, exp_to = None, None
         else:
-            df_export = export_cases_csv(date_from, date_to)
+            exp_from, exp_to = date_from, date_to
+
+        df_export = export_cases_csv(exp_from, exp_to)
         if not df_export.empty:
-            csv_bytes = df_export.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            fname = f"minor_or_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-            st.download_button(
-                label=f"📥 Download CSV ({len(df_export)} เคส)",
-                data=csv_bytes,
-                file_name=fname,
-                mime='text/csv',
-            )
+            dl_a, dl_b = st.columns(2)
+            with dl_a:
+                xlsx_data = export_summary_excel(exp_from, exp_to)
+                fname_xlsx = f"minor_or_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                st.download_button(
+                    label=f"📊 สรุปสถิติ (Excel+กราฟ)",
+                    data=xlsx_data,
+                    file_name=fname_xlsx,
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                )
+            with dl_b:
+                csv_bytes = df_export.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                fname_csv = f"minor_or_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                st.download_button(
+                    label=f"📥 ข้อมูลดิบ (CSV — {len(df_export)} เคส)",
+                    data=csv_bytes,
+                    file_name=fname_csv,
+                    mime='text/csv',
+                )
         else:
             st.caption("ไม่มีข้อมูลให้ export")
 
@@ -711,10 +724,10 @@ def page_admin():
         with col_from:
             sel_from = st.date_input("📅 วันที่เริ่มต้น", value=default_from,
                                      max_value=today_dt, key="hist_from")
+
         with col_to:
             sel_to = st.date_input("📅 วันที่สิ้นสุด", value=default_to,
                                    max_value=today_dt, key="hist_to")
-
 
         if sel_from > sel_to:
             st.warning("⚠️ วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด")

@@ -14,6 +14,7 @@ from minor_or_db import (
     mark_arrived, mark_in_or, mark_in_or_with_nurses, mark_op_end, mark_discharged,
     get_db_stats, DIVISIONS, div_name, DIV_CODE_MAP,
     lookup_cost, PROCEDURE_COSTS, PATHO_COSTS,
+    export_summary_excel,
 )
 
 
@@ -1559,8 +1560,24 @@ def _tab_summary():
 
         # ---- Download ----
         if s_all['total'] > 0:
-            df_export = get_cases()
-            csv_data = df_export.to_csv(index=False).encode('utf-8-sig')
-            st.download_button('📥 ดาวน์โหลดข้อมูลทั้งหมด (CSV)', csv_data,
-                               'minor_or_cases.csv', 'text/csv',
-                               use_container_width=True)
+            dl1, dl2 = st.columns(2)
+            with dl1:
+
+                xlsx_data = export_summary_excel(d_from, d_to)
+                st.download_button(
+                    '📊 ดาวน์โหลดสรุปสถิติ (Excel+กราฟ)',
+                    xlsx_data,
+                    'minor_or_summary.xlsx',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    use_container_width=True,
+                )
+            with dl2:
+                df_export = get_cases()
+                csv_data = df_export.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    '📥 ดาวน์โหลดข้อมูลดิบ (CSV)',
+                    csv_data,
+                    'minor_or_cases.csv',
+                    'text/csv',
+                    use_container_width=True,
+                )

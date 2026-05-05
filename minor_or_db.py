@@ -1449,3 +1449,12 @@ def export_cases_csv(date_from=None, date_to=None):
     if not df.empty and 'division_code' in df.columns:
         df['division_name'] = df['division_code'].apply(div_name)
     return df
+
+
+# ---------------------------------------------------------------------------
+# Excel export wrapper — delegate to minor_or_export.py
+# ---------------------------------------------------------------------------
+def export_summary_excel(date_from=None, date_to=None) -> bytes:
+    """Thin wrapper so callers can just pass date range."""
+    from minor_or_export import export_summary_excel as _export
+    return _export(get_summary, export_cases_csv, div_name, date_from, date_to)
