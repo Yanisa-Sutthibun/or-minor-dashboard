@@ -1456,8 +1456,10 @@ def get_historical_analytics(date_from=None, date_to=None):
         top_div_count = int(div_df.iloc[0]['n'])
         top_div_pct = round(top_div_count / div_df['n'].sum() * 100, 1)
 
+    # NOTE: LIMIT bumped to 200 — fuzzy grouping in minor_or_admin.py needs
+    # the long tail to merge variants like "off PERM cath" + "off TCC Rt IJV".
     proc_df = pd.read_sql_query(
-        f"SELECT procedure_name, COUNT(*) as n, AVG(actual_duration_min) as avg_min FROM cases WHERE {where_sql} GROUP BY procedure_name ORDER BY n DESC LIMIT 15",
+        f"SELECT procedure_name, COUNT(*) as n, AVG(actual_duration_min) as avg_min FROM cases WHERE {where_sql} GROUP BY procedure_name ORDER BY n DESC LIMIT 200",
         conn, params=params)
 
     total_cases = conn.execute(f"SELECT COUNT(*) FROM cases WHERE {where_sql}", params).fetchone()[0]

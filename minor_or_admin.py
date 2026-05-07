@@ -19,6 +19,135 @@ from minor_or_db import (
     get_wait_stats, get_handover_stats,
 )
 import numpy as np
+import re
+from difflib import SequenceMatcher
+
+
+# ============================================================================
+# Procedure name fuzzy grouping
+# ----------------------------------------------------------------------------
+# รวม "หัตถการ" ที่เขียนต่างกันแต่หมายถึงสิ่งเดียวกัน เช่น
+#   - off PERM cath / off TCC Rt IJV  →  "Off catheter (PERM/TCC/IJV)"
+#   - right big toe partial nail extraction / partial nail extraction  →  "Nail extraction"
+#   - excision / Excision  →  "Excision" (case-insensitive)
+# วิธีการ: rule-based (regex) ก่อน → fuzzy similarity (SequenceMatcher) ทีหลัง
+# ============================================================================
+
+# (compiled regex pattern, canonical name)  — ลำดับสำคัญ! pattern แรกที่ match จะถูกใช้
+_PROC_RULES = [
+    # Off catheter (PERM cath / TCC / IJV)
+    (re.compile(
+        r'\boff\b.*\b(perm\s*cath|perm|tcc|ijv|hd\s*cath|cath(eter)?)\b',
+        re.I), 'Off catheter (PERM/TCC/IJV)'),
+    (re.compile(r'\b(remove|removal)\b.*\bcath(eter)?\b', re.I),
+        'Off catheter (PERM/TCC/IJV)'),
+
+    # Nail extraction (รวม partial / total / specific toe)
+    (re.compile(r'nail\s*(extract(ion)?|removal|avulsion)', re.I),
+        'Nail extraction'),
+
+    # ESWL
+    (re.compile(r'\beswl\b', re.I), 'ESWL'),
+
+    # I&D — Incision & Drainage
+    (re.compile(r'\bi\s*[&+]\s*d\b|\bincision\s*(and|&)\s*drainage\b', re.I),
+        'I&D'),
+
+    # Excision (รวม Excisional biopsy ทั่วไป)
+    (re.compile(r'\bexcis(ion|e|ional)\b', re.I), 'Excision'),
+
+    # EC
+    (re.compile(r'^\s*ec\s*$|\bec\b\s*(case|biopsy)?', re.I), 'EC'),
+
+    # Morpheus (laser)
+    (re.compile(r'\bmorpheus\b', re.I), 'Morpheus'),
+]
+
+
+def _strip_modifiers(name: str) -> str:
+    """ตัดคำขยายที่ไม่ส่งผลต่อชนิดหัตถการ เช่น Rt/Lt/Right/Left และเลขท้าย."""
+    s = re.sub(r'\b(rt|lt|right|left|bilateral|bil|both)\b\.?', '', name, flags=re.I)
+    s = re.sub(r'\bbig\s*toe\b|\b(1st|2nd|3rd|4th|5th)\s*toe\b', 'toe', s, flags=re.I)
+    s = re.sub(r'\s+\d+\s*$', '', s)              # ลบเลขท้าย เช่น "extraction 2"
+    s = re.sub(r'[\(\)\[\]\.]', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
+def _normalize_procedure_name(name) -> str:
+    """แปลงชื่อหัตถการดิบ → canonical group ตาม rule + cleanup."""
+    if name is None:
+        return 'UNKNOWN'
+    s = str(name).strip()
+    if not s or s.lower() in ('nan', 'none', '-'):
+        return 'UNKNOWN'
+    # Rule-based ก่อน
+    for pat, canonical in _PROC_RULES:
+        if pat.search(s):
+            return canonical
+    # ตัด side / เลขท้าย แล้ว Title Case
+    cleaned = _strip_modifiers(s)
+    if not cleaned:
+        return s
+    # ถ้าเป็นตัวย่อสั้น ๆ ทั้งหมด (≤4 ตัว) เก็บ uppercase ไว้
+    if len(cleaned) <= 4 and cleaned.isalpha():
+        return cleaned.upper()
+    return cleaned[0].upper() + cleaned[1:]
+
+
+def _fuzzy_merge(df: pd.DataFrame, name_col: str = 'procedure_name',
+                 threshold: float = 0.88) -> pd.DataFrame:
+    """หลังผ่าน rule แล้ว ถ้ายังมีชื่อใกล้เคียงกันมาก (เช่น พิมพ์ผิดเล็กน้อย)
+    ให้รวมเข้ากลุ่มที่มีจำนวนเคสมากกว่า"""
+    if df.empty:
+        return df
+    df = df.sort_values('n', ascending=False).reset_index(drop=True)
+    canonical_for = {}      # raw name → canonical
+    canonical_list = []     # canonical names ที่เลือกแล้ว
+    for raw in df[name_col].tolist():
+        best_canon, best_ratio = None, 0.0
+        rl = raw.lower()
+        for canon in canonical_list:
+            r = SequenceMatcher(None, rl, canon.lower()).ratio()
+            if r > best_ratio:
+                best_ratio, best_canon = r, canon
+        if best_canon is not None and best_ratio >= threshold:
+            canonical_for[raw] = best_canon
+        else:
+            canonical_for[raw] = raw
+            canonical_list.append(raw)
+    df['_canon'] = df[name_col].map(canonical_for)
+    # weighted mean ของ avg_min
+    df['_total_min'] = df['n'] * df['avg_min'].fillna(0)
+    g = (df.groupby('_canon', as_index=False)
+           .agg(n=('n', 'sum'), _total_min=('_total_min', 'sum')))
+    g['avg_min'] = (g['_total_min'] / g['n']).round(0)
+    g = g.rename(columns={'_canon': name_col}).drop(columns=['_total_min'])
+    return g.sort_values('n', ascending=False).reset_index(drop=True)
+
+
+def group_top_procedures(proc_df: pd.DataFrame, top_n: int = 10,
+                         fuzzy_threshold: float = 0.88) -> pd.DataFrame:
+    """รวมหัตถการที่คล้ายกันเข้าด้วยกัน แล้วคืน Top-N
+    Returns DataFrame[procedure_name, n, avg_min]
+    """
+    if proc_df is None or proc_df.empty:
+        return proc_df
+    df = proc_df.copy()
+    df['procedure_name'] = (df['procedure_name']
+                            .fillna('UNKNOWN').astype(str)
+                            .apply(_normalize_procedure_name))
+    if 'avg_min' not in df.columns:
+        df['avg_min'] = 0
+    # rollup ครั้งแรกหลัง normalize (weighted mean)
+    df['_total_min'] = df['n'] * df['avg_min'].fillna(0)
+    df = (df.groupby('procedure_name', as_index=False)
+            .agg(n=('n', 'sum'), _total_min=('_total_min', 'sum')))
+    df['avg_min'] = (df['_total_min'] / df['n']).round(0)
+    df = df.drop(columns=['_total_min'])
+    # fuzzy merge รอบสองสำหรับชื่อที่หลุด rule
+    df = _fuzzy_merge(df, 'procedure_name', threshold=fuzzy_threshold)
+    return df.head(top_n).reset_index(drop=True)
 
 
 # ============================================================================
@@ -509,13 +638,14 @@ def _render_historical_analytics(date_from: str, date_to: str):
         else:
             st.caption("ยังไม่มีข้อมูลสาขา")
 
-    # -- Chart 4: Top procedures --
+    # -- Chart 4: Top procedures (with fuzzy grouping) --
     st.markdown('<div class="section-title">🔬 Top หัตถการที่ทำบ่อย</div>', unsafe_allow_html=True)
     proc_df = data['proc_df']
     if not proc_df.empty:
-        proc_show = proc_df.head(10).copy()
+        # รวมหัตถการที่คล้ายกัน เช่น Off PERM/Off TCC, nail extraction, excision/Excision
+        proc_show = group_top_procedures(proc_df, top_n=10).copy()
         proc_show['label'] = proc_show['procedure_name'].str[:40]
-        proc_show['avg_min'] = proc_show['avg_min'].round(0).astype(int)
+        proc_show['avg_min'] = proc_show['avg_min'].fillna(0).round(0).astype(int)
         fig = px.bar(proc_show, x='n', y='label', orientation='h',
                      text='n',
                      labels={'n': 'จำนวนเคส', 'label': 'หัตถการ'},
@@ -527,6 +657,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
         )
         fig.update_traces(textposition='outside')
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("💡 ระบบรวมหัตถการที่คล้ายกันโดยอัตโนมัติ (เช่น Off PERM/TCC, nail extraction)")
     else:
         st.caption("ยังไม่มีข้อมูลหัตถการ")
 
