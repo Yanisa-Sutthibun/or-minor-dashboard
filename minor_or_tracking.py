@@ -1572,14 +1572,6 @@ def _tab_summary():
                     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     use_container_width=True,
                 )
-                xlsx_data = export_summary_excel(d_from, d_to)
-                st.download_button(
-                    '📊 ดาวน์โหลดสรุปสถิติ (Excel+กราฟ)',
-                    xlsx_data,
-                    'minor_or_summary.xlsx',
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    use_container_width=True,
-                )
             with dl2:
                 df_export = get_cases()
                 csv_data = df_export.to_csv(index=False).encode('utf-8-sig')
