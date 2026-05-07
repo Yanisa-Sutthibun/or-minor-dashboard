@@ -319,12 +319,11 @@ def _render_workload(wl):
 def _render_ai_research_tab():
     """🤖 AI Prediction (งานวิจัย) — แสดงศักยภาพของ AI ทำนายเวลาผ่าตัด
 
-    แสดง 5 ส่วน:
-    1. KPI Cards (4): n, MAE, % within ±10 min, R²
-    2. Filter Controls (หัตถการ, แพทย์)
+    แสดง 4 ส่วน:
+    1. Filter (หัตถการ — รวมกลุ่ม fuzzy ด้วย _normalize_procedure_name)
+    2. KPI Cards (4): n, MAE, % within ±10 min, R²
     3. Scatter plot (predicted vs actual)
     4. Error distribution histogram
-    5. Top 5 worst predictions table
     """
     st.markdown('<div class="section-title">🤖 AI Prediction Performance</div>',
                 unsafe_allow_html=True)
@@ -344,29 +343,24 @@ def _render_ai_research_tab():
                           / ai_df['actual_duration_min'].replace(0, np.nan)
                           * 100)
 
-    # ── Filter Controls (หัตถการ + แพทย์) ──
-    proc_options = sorted(ai_df['procedure_name'].dropna().unique().tolist())
-    surg_options = sorted(ai_df['surgeon_name'].dropna().unique().tolist())
+    # ── Apply fuzzy normalization to procedure names (canonical groups) ──
+    # ทำให้ filter dropdown แสดงชื่อแบบรวมแล้ว เช่น
+    # "ESWL", "ESWL Right" → "ESWL"  /  "QS", "Q-Switch" → "Q-Switch ND:YAG"
+    ai_df['proc_canonical'] = ai_df['procedure_name'].apply(_normalize_procedure_name)
 
-    f1, f2 = st.columns(2)
-    with f1:
-        sel_procs = st.multiselect(
-            "🔬 หัตถการ", proc_options, default=[],
-            placeholder="ทั้งหมด — เลือกเพื่อกรอง",
-            key="ai_filter_proc",
-        )
-    with f2:
-        sel_surgs = st.multiselect(
-            "👨‍⚕️ แพทย์", surg_options, default=[],
-            placeholder="ทั้งหมด — เลือกเพื่อกรอง",
-            key="ai_filter_surg",
-        )
+    # ── Filter Control (เฉพาะหัตถการ — เอาแพทย์ออก) ──
+    proc_options = sorted(
+        [p for p in ai_df['proc_canonical'].dropna().unique() if p != 'UNKNOWN']
+    )
+    sel_procs = st.multiselect(
+        "🔬 หัตถการ (รวมกลุ่ม fuzzy แล้ว)", proc_options, default=[],
+        placeholder="ทั้งหมด — เลือกเพื่อกรอง",
+        key="ai_filter_proc",
+    )
 
     df = ai_df.copy()
     if sel_procs:
-        df = df[df['procedure_name'].isin(sel_procs)]
-    if sel_surgs:
-        df = df[df['surgeon_name'].isin(sel_surgs)]
+        df = df[df['proc_canonical'].isin(sel_procs)]
 
     n = len(df)
     if n == 0:
@@ -456,8 +450,9 @@ def _render_ai_research_tab():
                 'พอใช้ (11-20)':  '#fb8c00',
                 'ผิดมาก (>20)':   '#e53935',
             },
-            hover_data={'procedure_name': True, 'surgeon_name': True,
-                        'error': ':.0f', 'error_cat': False},
+            hover_data={'proc_canonical': True,
+                        'error': ':.0f', 'error_cat': False,
+                        'procedure_name': False, 'surgeon_name': False},
             labels={'actual_duration_min': 'เวลาจริง (นาที)',
                     'ai_predicted_min': 'AI ทำนาย (นาที)'},
         )
