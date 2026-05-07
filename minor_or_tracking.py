@@ -408,7 +408,7 @@ def _render_waiting_card(row):
 # ============================================================================
 
 _STATION_FILTER = {
-    'receive':   ['scheduled', 'arrived'],
+    'receive':   ['scheduled'],
     'or':        ['in_or'],
     'recovery':  ['post_op__recovery'],
     'discharge': ['post_op__transfer', 'discharged'],
