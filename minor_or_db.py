@@ -563,8 +563,8 @@ def import_schedule(df: pd.DataFrame, op_date: str) -> int:
         'name': ['dspname', 'name', '\u0e0a\u0e37\u0e48\u0e2d', 'ptname', 'patient_name', 'hn_name'],
         'hn': ['hn', 'HN', 'hosnum'],
         'an': ['an', 'AN', 'admitnum', 'an.1'],
-        'diagnosis': ['icd10name', 'icd10', 'diag', 'diagnosis', 'prediag',
-                       'pre_diag', 'icd10nm', 'วินิจฉัย'],
+        'diagnosis': ['icd10_name', 'icd10name', 'icd10nm', 'diag', 'diagnosis',
+                       'prediag', 'pre_diag', 'วินิจฉัย'],
         'procedure_name': ['icd9cm_name', 'icd9cmnm', 'procedure', 'procedure_name',
                            'procname', '\u0e2b\u0e31\u0e15\u0e16\u0e01\u0e32\u0e23', 'opname'],
         'procedure_icd9': ['icd9cm'],
@@ -1594,6 +1594,7 @@ def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
 # ---------------------------------------------------------------------------
 # Excel export wrapper — delegate to minor_or_export.py
 # ---------------------------------------------------------------------------
+
 def export_summary_excel(date_from=None, date_to=None) -> bytes:
     """Thin wrapper so callers can just pass date range."""
     from minor_or_export import export_summary_excel as _export
