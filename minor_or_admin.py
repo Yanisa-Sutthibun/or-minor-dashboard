@@ -65,6 +65,11 @@ _PROC_RULES = [
 
     # Morpheus (laser)
     (re.compile(r'\bmorpheus\b', re.I), 'Morpheus'),
+
+    # Q-Switch ND:YAG laser
+    # รวม "QS", "Q-Switch", "Q Switch", "ND-YAG", "ND:YAG", "Nd:YAG", "ND YAG"
+    (re.compile(r'\b(?:qs|q[\s\-]*switch|nd[\s:\-]*yag)\b', re.I),
+        'Q-Switch ND:YAG'),
 ]
 
 
@@ -680,43 +685,34 @@ def _render_historical_analytics(date_from: str, date_to: str):
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # ── สรุปภาพรวมอัตโนมัติ (ตัวเลขล้วน ไม่มี label "ยุ่ง/ว่าง") ──
-            morning = pivot[[h for h in range(8, 12)
-                             if h in pivot.columns]].values.mean()
-            noon = pivot[[h for h in range(12, 15)
-                          if h in pivot.columns]].values.mean()
-            evening = pivot[[h for h in range(15, 17)
-                             if h in pivot.columns]].values.mean()
+            # ── สรุปภาพรวม: เคสเยอะ/น้อยสุด → วัน + ช่วงเช้า/บ่าย ──
+            def _period(h):
+                """แปลงชั่วโมง → ช่วงเช้า / ช่วงบ่าย"""
+                return 'ช่วงเช้า' if h < 12 else 'ช่วงบ่าย'
 
             flat = pivot.stack()
             peak_idx = flat.idxmax() if flat.max() > 0 else None
             quiet_nonzero = flat[flat > 0]
             quiet_idx = quiet_nonzero.idxmin() if not quiet_nonzero.empty else None
 
-            insight_html = f"""
+            insight_html = """
 <div style="background:#f5f5f5;border-radius:8px;padding:12px 14px;
-            margin-top:8px;font-size:13px;line-height:1.7;">
+            margin-top:8px;font-size:14px;line-height:1.8;">
   <div style="font-weight:700;color:#333;margin-bottom:6px;">
-    📊 สรุปภาพรวม (เคสเฉลี่ยต่อครั้ง)
+    📊 สรุปภาพรวม
   </div>
-  🌅 <b>ตอนเช้า</b> (8-11): {morning:.1f} เคส/ชม.<br>
-  🌞 <b>ตอนกลางวัน</b> (12-14): {noon:.1f} เคส/ชม.<br>
-  🌆 <b>ตอนบ่าย-เย็น</b> (15-17): {evening:.1f} เคส/ชม.<br>
 """
             if peak_idx is not None:
+                p_dow, p_hour = _THAI_DAYS[peak_idx[0]], int(peak_idx[1])
                 insight_html += (
-                    '  <hr style="margin:8px 0;border:none;'
-                    'border-top:1px solid #ddd;">\n'
-                    f'  🔝 <b>เคสเยอะสุด</b>: {_THAI_DAYS[peak_idx[0]]} '
-                    f'{peak_idx[1]}:00 (เฉลี่ย {float(flat[peak_idx]):.1f} '
-                    f'เคส/{_THAI_DAYS[peak_idx[0]]})<br>\n'
+                    f'  🔝 <b>เคสเยอะสุด</b>: วัน{p_dow} {_period(p_hour)} '
+                    f'(เฉลี่ย {float(flat[peak_idx]):.1f} เคส/{p_dow})<br>\n'
                 )
             if quiet_idx is not None:
+                q_dow, q_hour = _THAI_DAYS[quiet_idx[0]], int(quiet_idx[1])
                 insight_html += (
-                    f'  😴 <b>เคสน้อยสุด</b> (ที่มีเคส): '
-                    f'{_THAI_DAYS[quiet_idx[0]]} {quiet_idx[1]}:00 '
-                    f'(เฉลี่ย {float(flat[quiet_idx]):.1f} '
-                    f'เคส/{_THAI_DAYS[quiet_idx[0]]})\n'
+                    f'  😴 <b>เคสน้อยสุด</b>: วัน{q_dow} {_period(q_hour)} '
+                    f'(เฉลี่ย {float(flat[quiet_idx]):.1f} เคส/{q_dow})\n'
                 )
             insight_html += "</div>"
             st.markdown(insight_html, unsafe_allow_html=True)
