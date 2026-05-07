@@ -6,8 +6,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+_BKK = timezone(timedelta(hours=7))
+
+def _now_bkk():
+    """Return current datetime in Bangkok timezone (naive, for comparisons with stored timestamps)."""
+    return datetime.now(_BKK).replace(tzinfo=None)
 from minor_or_db import (
     get_room_status, get_kpi, get_delay_alerts, get_workload,
     get_summary, get_nurse_stats, div_name, DIV_CODE_MAP,
@@ -79,7 +83,7 @@ def _render_room_cards(rooms):
                 if active.get('in_or_at'):
                     try:
                         start = datetime.strptime(active['in_or_at'], '%Y-%m-%d %H:%M:%S')
-                        mins = int((datetime.now() - start).total_seconds() / 60)
+                        mins = int((_now_bkk() - start).total_seconds() / 60)
                         elapsed = f'<div style="font-size:24px;font-weight:700;color:#1565c0;">{mins} นาที</div>'
                     except:
                         pass
@@ -612,7 +616,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
             dl_a, dl_b = st.columns(2)
             with dl_a:
                 xlsx_data = export_summary_excel(exp_from, exp_to)
-                fname_xlsx = f"minor_or_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                fname_xlsx = f"minor_or_summary_{_now_bkk().strftime('%Y%m%d_%H%M')}.xlsx"
                 st.download_button(
                     label=f"📊 สรุปสถิติ (Excel+กราฟ)",
                     data=xlsx_data,
@@ -621,7 +625,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
                 )
             with dl_b:
                 csv_bytes = df_export.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                fname_csv = f"minor_or_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                fname_csv = f"minor_or_data_{_now_bkk().strftime('%Y%m%d_%H%M')}.csv"
                 st.download_button(
                     label=f"📥 ข้อมูลดิบ (CSV — {len(df_export)} เคส)",
                     data=csv_bytes,
@@ -680,13 +684,13 @@ def page_admin():
     """หน้าบริหารจัดการ — สำหรับหัวหน้าพยาบาล / ผู้บริหาร."""
     st.markdown(_ADMIN_CSS, unsafe_allow_html=True)
 
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = _now_bkk().strftime('%Y-%m-%d')
 
     # Header
     st.markdown(f"""
     <div class="admin-header">
         <h1>📊 บริหารจัดการห้องผ่าตัดเล็ก</h1>
-        <p>ข้อมูล ณ วันที่ {datetime.now().strftime('%d/%m/%Y เวลา %H:%M น.')}</p>
+        <p>ข้อมูล ณ วันที่ {_now_bkk().strftime('%d/%m/%Y เวลา %H:%M น.')}</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -695,7 +699,7 @@ def page_admin():
 
     # -- TAB 1: Today overview --
     with tab_today:
-        op_date = datetime.now().strftime('%Y-%m-%d')
+        op_date = _now_bkk().strftime('%Y-%m-%d')
 
         # =========================================================
         # Section: เคสในเวลา
@@ -716,7 +720,7 @@ def page_admin():
 
 
         _thai_months = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
-        _today_dt = datetime.now()
+        _today_dt = _now_bkk()
         _thai_date = f"{_today_dt.day} {_thai_months[_today_dt.month]} {_today_dt.year + 543}"
         st.markdown(f'<div class="section-title">📈 ตัวเลขสำคัญ — {_thai_date}</div>', unsafe_allow_html=True)
         kpi = get_kpi(op_date)
@@ -826,7 +830,7 @@ def page_admin():
 
     # -- TAB 2: Historical analytics --
     with tab_history:
-        today_dt = datetime.now().date()
+        today_dt = _now_bkk().date()
 
         # --- Quick preset buttons ---
         preset = st.radio(

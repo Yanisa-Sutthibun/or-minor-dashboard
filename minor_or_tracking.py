@@ -6,7 +6,12 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+_BKK = timezone(timedelta(hours=7))
+
+def _now_bkk():
+    """Return current datetime in Bangkok timezone (naive, for comparisons with stored timestamps)."""
+    return datetime.now(_BKK).replace(tzinfo=None)
 from minor_or_db import (
     init_db, import_schedule, add_walkin_case, get_cases,
     get_pending_calls, get_summary, update_case, update_checkbox,
@@ -205,7 +210,7 @@ def page_tracking():
     col_d, col_u, col_r = st.columns([4, 4, 1])
     with col_d:
         view_date = st.date_input("📅 วันที่",
-                                   value=datetime.now().date(),
+                                   value=_now_bkk().date(),
                                    label_visibility='collapsed')
         view_date_str = view_date.strftime('%Y-%m-%d')
     with col_u:
@@ -621,7 +626,7 @@ def _render_after_hours_card(row):
                 update_case(cid, status='discharged',
                             treatment_cost=cost_val,
                             surgeon_name=aft_surg.strip() if aft_surg else surg_d,
-                            discharged_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                            discharged_at=_now_bkk().strftime('%Y-%m-%d %H:%M:%S'))
                 if f'aft_confirming_{cid}' in st.session_state:
                     del st.session_state[f'aft_confirming_{cid}']
                 st.rerun()
@@ -1098,7 +1103,7 @@ def _render_actions(cid, status, row=None):
 
         b1, b2, b3 = st.columns(3)
         with b1:
-            if st.button(f"🏠 Discharge ({datetime.now().strftime('%H:%M')} น.)",
+            if st.button(f"🏠 Discharge ({_now_bkk().strftime('%H:%M')} น.)",
                          key=f"dc_{cid}", type='primary', use_container_width=True):
                 mark_discharged(cid)
                 st.rerun()
@@ -1188,7 +1193,7 @@ def _tab_pending_calls():
 
     for op_date in df['op_date'].unique():
         day_df = df[df['op_date'] == op_date]
-        days_ago = (datetime.now().date() - pd.to_datetime(op_date).date()).days
+        days_ago = (_now_bkk().date() - pd.to_datetime(op_date).date()).days
         icon = "🔴" if days_ago >= 3 else "🟡" if days_ago >= 1 else "🟢"
         st.markdown(f"**{icon} วันที่ {op_date}** ({days_ago} วันที่แล้ว)")
 
@@ -1358,7 +1363,7 @@ def _render_after_hours_summary(df_cases, prefix=""):
 
 
 def _tab_summary():
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = _now_bkk().strftime('%Y-%m-%d')
 
     # === 2 Sub-tabs ===
     sub_today, sub_stats = st.tabs(["📋 สรุปยอดวันนี้", "📈 สรุปยอดสถิติ"])
@@ -1489,7 +1494,7 @@ def _tab_summary():
     # SUB-TAB 2: สรุปยอดสถิติ (สะสม)
     # =============================================
     with sub_stats:
-        today_dt = datetime.now().date()
+        today_dt = _now_bkk().date()
 
         # --- Quick preset buttons ---
         preset = st.radio(
