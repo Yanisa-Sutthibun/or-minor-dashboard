@@ -1490,6 +1490,31 @@ def _tab_summary():
         )
         _render_after_hours_summary(df_today, prefix="today")
 
+        # ---- Download วันนี้ ----
+        st.markdown("---")
+        if s_today['total'] > 0:
+            dl1, dl2 = st.columns(2)
+            with dl1:
+                xlsx_data = export_summary_excel(today, today)
+                st.download_button(
+                    '📊 ดาวน์โหลดสรุปวันนี้ (Excel+กราฟ)',
+                    xlsx_data,
+                    f'minor_or_summary_{today}.xlsx',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    use_container_width=True,
+                    key='dl_today_xlsx',
+                )
+            with dl2:
+                csv_data = df_today.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    '📥 ดาวน์โหลดข้อมูลดิบ (CSV)',
+                    csv_data,
+                    f'minor_or_cases_{today}.csv',
+                    'text/csv',
+                    use_container_width=True,
+                    key='dl_today_csv',
+                )
+
     # =============================================
     # SUB-TAB 2: สรุปยอดสถิติ (สะสม)
     # =============================================
