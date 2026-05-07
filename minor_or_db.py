@@ -911,11 +911,11 @@ def get_summary(date_from=None, date_to=None) -> dict:
     total = q1(f"SELECT COUNT(*) FROM cases {where}")
     completed = q1(f"SELECT COUNT(*) FROM cases {where} AND status='discharged'")
     cancelled = q1(f"SELECT COUNT(*) FROM cases {where} AND status='cancelled'")
-    n_set = q1(f"SELECT COUNT(*) FROM cases {where} AND case_category IN ('SET','à¹à¸à¸ªà¸à¸±à¸à¸«à¸¡à¸²à¸¢')")
+    n_set = q1(f"SELECT COUNT(*) FROM cases {where} AND case_category IN ('SET','เคสนัดหมาย')")
     n_walkin = q1(f"SELECT COUNT(*) FROM cases {where} AND case_category IN ('WALK-IN','Walk-in')")
     n_opd = q1(f"SELECT COUNT(*) FROM cases {where} AND patient_type='OPD'")
     n_ipd = q1(f"SELECT COUNT(*) FROM cases {where} AND patient_type='IPD'")
-    n_after = q1(f"SELECT COUNT(*) FROM cases {where} AND patient_type='à¸à¸­à¸à¹à¸§à¸¥à¸²'")
+    n_after = q1(f"SELECT COUNT(*) FROM cases {where} AND patient_type='นอกเวลา'")
 
     top_procs = pd.read_sql_query(f"""
         SELECT UPPER(procedure_name) as procedure_name, COUNT(*) as n FROM cases {where}
