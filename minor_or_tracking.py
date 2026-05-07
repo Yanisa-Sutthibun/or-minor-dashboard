@@ -595,7 +595,6 @@ def _render_after_hours_card(row):
                 f'border-radius:12px;font-size:12px;">match: {m["procedure_name"]}</span>',
                 unsafe_allow_html=True)
             cost_val = int(m['new_price_thb'])
-            st.markdown(f"**ค่าหัตถการ: {cost_val:,} บาท**")
         elif len(matches) > 1:
             st.markdown(
                 f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
@@ -608,9 +607,8 @@ def _render_after_hours_card(row):
             sel = st.selectbox("เลือกรายการ", options_display, key=f"aftpick_{cid}")
             sel_idx = options_display.index(sel)
             cost_val = int(matches[sel_idx]['new_price_thb'])
-        else:
-            cost_val = st.number_input("ค่าหัตถการ (บาท)", min_value=0,
-                                        value=0, step=100, key=f"aftcost_{cid}")
+        cost_val = st.number_input("ค่าหัตถการ (บาท)", min_value=0,
+                                    value=cost_val, step=100, key=f"aftcost_{cid}")
 
         # แพทย์ที่ทำ (editable)
         aft_surg = st.text_input("แพทย์ที่ทำ", value=surg_d, key=f"aftsurg_{cid}")
@@ -1031,7 +1029,6 @@ def _render_actions(cid, status, row=None):
                         f'border-radius:12px;font-size:12px;">match: {m["procedure_name"]}</span>',
                         unsafe_allow_html=True)
                     cost1 = int(m['new_price_thb'])
-                    st.markdown(f"**ค่าหัตถการ: {cost1:,} บาท**")
 
                 elif len(matches) > 1:
                     # หลายราคา — dropdown ให้เลือก
@@ -1057,14 +1054,16 @@ def _render_actions(cid, status, row=None):
                     new_proc = matches[sel_idx]['procedure_name']
 
                 else:
-                    # ไม่เจอ — พิมพ์เอง
+                    # ไม่เจอ
                     st.markdown(f"**หัตถการ:** {cur_proc}")
                     st.markdown(
                         '<span style="background:#fff3e0;color:#e65100;padding:2px 8px;'
                         'border-radius:12px;font-size:12px;">ไม่พบราคาอัตโนมัติ</span>',
                         unsafe_allow_html=True)
-                    cost1 = st.number_input("ค่าหัตถการ (บาท)", min_value=0,
-                                            value=cur_cost, step=100, key=f"cost_{cid}")
+                    cost1 = cur_cost
+                # ช่องแก้ไขค่าหัตถการ (แก้ได้เสมอ เผื่อ autofill พลาด)
+                cost1 = st.number_input("ค่าหัตถการ (บาท)", min_value=0,
+                                        value=cost1, step=100, key=f"cost_{cid}")
 
                 st.markdown("---")
 
