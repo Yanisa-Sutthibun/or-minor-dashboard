@@ -597,6 +597,47 @@ def _render_historical_analytics(date_from: str, date_to: str):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # -- Summary KPI (สะสม) --
+    st.markdown('<div class="section-title">📋 สรุปยอดสะสม</div>', unsafe_allow_html=True)
+    s_all = get_summary(date_from=date_from, date_to=date_to)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("เคสทั้งหมด", s_all['total'])
+    k2.metric("ผ่าเสร็จ", s_all['completed'])
+    k3.metric("ยกเลิก", s_all['cancelled'])
+    cancel_r = s_all['cancelled'] / s_all['total'] * 100 if s_all['total'] > 0 else 0
+    k4.metric("อัตรายกเลิก", "%.0f%%" % cancel_r)
+
+    k5, k6, k7, k8 = st.columns(4)
+    k5.metric("OPD", s_all['n_opd'])
+    k6.metric("IPD", s_all['n_ipd'])
+    k7.metric("เคสนัดหมาย", s_all['n_set'])
+    k8.metric("Walk-in", s_all['n_walkin'])
+
+    k9, k10, k11, k12 = st.columns(4)
+    k9.metric("💰 ค่าหัตถการ", f"{s_all['total_treatment']:,} ฿")
+    k10.metric("💵 รายได้รวม", f"{s_all['total_revenue']:,} ฿")
+    k11.metric("🧬 ส่งชิ้นเนื้อ", f"{s_all['n_patho_sent']} ราย")
+    k12.metric("🔬 ค่าชิ้นเนื้อ", f"{s_all['total_patho']:,} ฿")
+
+    # -- นอกเวลา สะสม --
+    st.markdown('<div class="section-title">🌙 เคสนอกเวลา (สะสม)</div>', unsafe_allow_html=True)
+    df_range = get_cases()
+    df_range = df_range[
+        (df_range['op_date'] >= date_from) &
+        (df_range['op_date'] <= date_to)
+    ]
+    aft_range = df_range[df_range['patient_type'] == 'นอกเวลา'].copy()
+    if aft_range.empty:
+        st.info("ไม่มีเคสนอกเวลาในช่วงนี้")
+    else:
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("เคสนอกเวลา", len(aft_range))
+        a2.metric("ยืนยันแล้ว", len(aft_range[aft_range['status'] == 'discharged']))
+        a3.metric("ยกเลิก", len(aft_range[aft_range['status'] == 'cancelled']))
+        a4.metric("💰 รายได้", f"{int(aft_range['treatment_cost'].fillna(0).sum()):,} ฿")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
     # -- Export --
     st.markdown('<div class="section-title">💾 Export ข้อมูล</div>', unsafe_allow_html=True)
     st.caption("ดาวน์โหลดข้อมูลสำหรับผู้บริหารหรือวิทยานิพนธ์")
@@ -830,6 +871,7 @@ def page_admin():
 
     # -- TAB 2: Historical analytics --
     with tab_history:
+        today_dt = _now_bkk().date()
         today_dt = _now_bkk().date()
 
         # --- Quick preset buttons ---
