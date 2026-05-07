@@ -1065,10 +1065,23 @@ def page_admin():
             _render_historical_analytics(*st.session_state['hist_range'])
 
         # =========================================================
-        # Section: เครื่องมือจัดการข้อมูล (Reclassify case_category)
+        # Section: เครื่องมือจัดการข้อมูล (Maintenance tools)
         # =========================================================
         st.markdown("---")
-        with st.expander("🔧 จัดการข้อมูล: Reclassify case_category", expanded=False):
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);'
+            'border-radius:10px;padding:12px 16px;margin:16px 0 8px;'
+            'border-left:4px solid #ef6c00;">'
+            '<span style="font-size:18px;font-weight:700;color:#e65100;">'
+            '🛠️ เครื่องมือจัดการข้อมูล (Maintenance)</span>'
+            '<div style="font-size:12px;color:#bf360c;margin-top:4px;">'
+            'สำหรับ admin/หัวหน้าพยาบาล: แก้ไขข้อมูลที่ import มาผิด '
+            'โดยไม่ต้องลบ DB — ต้องอัพโหลด CSV ต้นทาง'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander("🔧 ① Reclassify case_category (เคสนัดหมาย ↔ Walk-in)",
+                         expanded=False):
             st.caption(
                 "ใช้สำหรับแก้ข้อมูลเก่าที่ import มาแล้ว category ผิด "
                 "(เช่น เคสที่ควรเป็น Walk-in แต่ถูกตั้งเป็น 'เคสนัดหมาย') "
@@ -1149,7 +1162,8 @@ def page_admin():
         # =========================================================
         # Section: Re-import room timestamps (จาก intraop CSV)
         # =========================================================
-        with st.expander("⏱️ จัดการข้อมูล: Re-import room timestamps", expanded=False):
+        with st.expander("⏱️ ② Re-import room timestamps (in_or_at / op_end_at)",
+                         expanded=False):
             st.caption(
                 "รีเฟรชค่า in_or_at / op_end_at ของเคสที่มีอยู่ใน DB จาก intraop CSV "
                 "(`รอลบ.csv`) — ใช้ **roomtimein** / **roomtimeout** เป็นเวลาห้อง "
