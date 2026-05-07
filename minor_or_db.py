@@ -614,6 +614,13 @@ def import_schedule(df: pd.DataFrame, op_date: str) -> int:
             (op_date, data.get('hn', ''), proc)
         ).fetchone()
         if existing:
+            # Backfill diagnosis for existing cases if missing
+            _diag_tmp = data.get('diagnosis', '').strip()
+            if _diag_tmp and _diag_tmp.upper() not in ('', 'NAN', 'NONE', '-'):
+                conn.execute(
+                    "UPDATE cases SET diagnosis=? WHERE case_id=? AND (diagnosis IS NULL OR diagnosis='')",
+                    (_diag_tmp, existing[0])
+                )
             continue
 
         an_val = data.get('an')
@@ -1570,6 +1577,7 @@ def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
         SELECT COUNT(*) AS total
         FROM cases WHERE {where_sql} AND status != 'cancelled'
     """, conn, params=params)
+
 
     conn.close()
     total = int(total_row.iloc[0]['total']) if not total_row.empty else 0
