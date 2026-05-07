@@ -534,6 +534,8 @@ def _render_after_hours_card(row):
     hn_d = row['hn'] or '-'
     proc_d = row['procedure_name'] or '-'
     surg_d = row['surgeon_name'] or '-'
+    diag_d = row.get('diagnosis') or ''
+    _aft_diag = f'<div style="color:#555;font-size:12px;margin-top:2px;">Dx: {diag_d}</div>' if diag_d and diag_d.strip() not in ('', '-') else ''
 
     # If already discharged (confirmed) — show green "done" card
     if status == 'discharged':
@@ -546,6 +548,7 @@ def _render_after_hours_card(row):
                 <span class="pt-name">{name_d}</span>
                 <span class="pt-hn">HN: {hn_d}</span>
             </div>
+            {_aft_diag}
             <div class="pt-proc">{proc_d}</div>
             <div class="pt-meta">แพทย์: {surg_d} · ค่าหัตถการ: {cost_d:,} ฿</div>
         </div>""", unsafe_allow_html=True)
@@ -561,6 +564,7 @@ def _render_after_hours_card(row):
                 <span class="pt-name">{name_d}</span>
                 <span class="pt-hn">HN: {hn_d}</span>
             </div>
+            {_aft_diag}
             <div class="pt-proc" style="text-decoration:line-through;">{proc_d}</div>
         </div>""", unsafe_allow_html=True)
         if st.button("🔄 กู้คืนเคส", key=f"aft_restore_{cid}", use_container_width=True):
@@ -576,6 +580,7 @@ def _render_after_hours_card(row):
             <span class="pt-name">{name_d}</span>
             <span class="pt-hn">HN: {hn_d}</span>
         </div>
+        {_aft_diag}
         <div class="pt-proc">{proc_d}</div>
         <div class="pt-meta">แพทย์: {surg_d}</div>
     </div>""", unsafe_allow_html=True)
@@ -717,6 +722,9 @@ def _render_case(row):
     # Timeline info
     timeline = _build_timeline(row)
 
+    diag_d = row.get('diagnosis') or ''
+    diag_html = f'<div class="pt-diag" style="text-decoration:{text_deco};color:#555;font-size:12px;margin-top:2px;">Dx: {diag_d}</div>' if diag_d and diag_d.strip() not in ('', '-') else ''
+
     st.markdown(f"""
     <div class="case-card {card_cls}">
         <div>{pill_html}</div>
@@ -724,6 +732,7 @@ def _render_case(row):
             <span class="pt-name">{name_d}</span>
             <span class="pt-hn">HN: {hn_d}</span>
         </div>
+        {diag_html}
         <div class="pt-proc" style="text-decoration:{text_deco};">{proc_d}</div>
         <div class="pt-meta">แพทย์: {surg_d}  ·  สาขา: {div_d}</div>
         {_ai_badge(row)}

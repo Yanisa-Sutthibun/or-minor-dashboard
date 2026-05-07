@@ -125,6 +125,7 @@ def init_db():
             name             TEXT,
             hn               TEXT,
             an               TEXT,
+            diagnosis        TEXT,
             procedure_name   TEXT NOT NULL,
             surgeon_name     TEXT,
             division_code    TEXT,
@@ -286,6 +287,15 @@ def _migrate_v2(conn):
             pass
         existing.add('patho_cost')
 
+    # Add diagnosis column if missing
+    if 'diagnosis' not in existing:
+        try:
+            conn.execute("ALTER TABLE cases ADD COLUMN diagnosis TEXT")
+            conn.commit()
+        except Exception:
+            pass
+        existing.add('diagnosis')
+
     needs_recreate = has_check or ('arrived_at' not in existing)
 
     if needs_recreate:
@@ -305,6 +315,7 @@ def _migrate_v2(conn):
                 name             TEXT,
                 hn               TEXT,
                 an               TEXT,
+                diagnosis        TEXT,
                 procedure_name   TEXT NOT NULL,
                 surgeon_name     TEXT,
                 division_code    TEXT,
@@ -552,6 +563,8 @@ def import_schedule(df: pd.DataFrame, op_date: str) -> int:
         'name': ['dspname', 'name', '\u0e0a\u0e37\u0e48\u0e2d', 'ptname', 'patient_name', 'hn_name'],
         'hn': ['hn', 'HN', 'hosnum'],
         'an': ['an', 'AN', 'admitnum', 'an.1'],
+        'diagnosis': ['icd10name', 'icd10', 'diag', 'diagnosis', 'prediag',
+                       'pre_diag', 'icd10nm', 'วินิจฉัย'],
         'procedure_name': ['icd9cm_name', 'icd9cmnm', 'procedure', 'procedure_name',
                            'procname', '\u0e2b\u0e31\u0e15\u0e16\u0e01\u0e32\u0e23', 'opname'],
         'procedure_icd9': ['icd9cm'],
@@ -616,15 +629,19 @@ def import_schedule(df: pd.DataFrame, op_date: str) -> int:
                                    data.get('op_type', 'elective'), op_date)
 
         room = auto_assign_room(proc)
+        diag_val = data.get('diagnosis', '').strip()
+        if diag_val.upper() in ('', 'NAN', 'NONE', '-'):
+            diag_val = None
         conn.execute("""
-            INSERT INTO cases (op_date, name, hn, an, procedure_name, surgeon_name,
-                              division_code, case_category, patient_type, op_type,
-                              estimated_time, procnote, anesthesia_type,
+            INSERT INTO cases (op_date, name, hn, an, diagnosis, procedure_name,
+                              surgeon_name, division_code, case_category, patient_type,
+                              op_type, estimated_time, procnote, anesthesia_type,
                               oss_by_or, or_pre_visit, ai_predicted_min, room_no)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             op_date, data.get('name'), data.get('hn'),
-            an_val, proc, data.get('surgeon_name'), data.get('division_code'),
+            an_val, diag_val, proc, data.get('surgeon_name'),
+            data.get('division_code'),
             cls['case_category'], cls['patient_type'], data.get('op_type'),
             data.get('estimated_time'), data.get('procnote'),
             data.get('anesthesia_type'),
