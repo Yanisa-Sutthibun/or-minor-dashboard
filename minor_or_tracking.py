@@ -540,50 +540,44 @@ def _render_after_hours_card(row):
     # If already discharged (confirmed) — show green "done" card
     if status == 'discharged':
         cost_d = int(row.get('treatment_cost') or 0)
-        st.markdown(f"""
-        <div class="case-card" style="background:#e8f5e9;border-left:5px solid #4caf50;">
-            <div><span class="pill pill-dc">✅ ยืนยันแล้ว</span>
-                 <span class="pill pill-after">นอกเวลา</span></div>
-            <div style="margin-top:6px;">
-                <span class="pt-name">{name_d}</span>
-                <span class="pt-hn">HN: {hn_d}</span>
-            </div>
-            {_aft_diag}
-            <div class="pt-proc">{proc_d}</div>
-            <div class="pt-meta">แพทย์: {surg_d} · ค่าหัตถการ: {cost_d:,} ฿</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="case-card" style="background:#e8f5e9;border-left:5px solid #4caf50;">
+<div><span class="pill pill-dc">✅ ยืนยันแล้ว</span>
+<span class="pill pill-after">นอกเวลา</span></div>
+<div style="margin-top:6px;">
+<span class="pt-name">{name_d}</span>
+<span class="pt-hn">HN: {hn_d}</span>
+</div>{_aft_diag}
+<div class="pt-proc">{proc_d}</div>
+<div class="pt-meta">แพทย์: {surg_d} · ค่าหัตถการ: {cost_d:,} ฿</div>
+</div>""", unsafe_allow_html=True)
         return
 
     # If cancelled — show faded card
     if status == 'cancelled':
-        st.markdown(f"""
-        <div class="case-card card-cancelled">
-            <div><span class="pill pill-cancel">❌ ยกเลิก</span>
-                 <span class="pill pill-after">นอกเวลา</span></div>
-            <div style="margin-top:6px;text-decoration:line-through;">
-                <span class="pt-name">{name_d}</span>
-                <span class="pt-hn">HN: {hn_d}</span>
-            </div>
-            {_aft_diag}
-            <div class="pt-proc" style="text-decoration:line-through;">{proc_d}</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="case-card card-cancelled">
+<div><span class="pill pill-cancel">❌ ยกเลิก</span>
+<span class="pill pill-after">นอกเวลา</span></div>
+<div style="margin-top:6px;text-decoration:line-through;">
+<span class="pt-name">{name_d}</span>
+<span class="pt-hn">HN: {hn_d}</span>
+</div>{_aft_diag}
+<div class="pt-proc" style="text-decoration:line-through;">{proc_d}</div>
+</div>""", unsafe_allow_html=True)
         if st.button("🔄 กู้คืนเคส", key=f"aft_restore_{cid}", use_container_width=True):
             update_case(cid, status='scheduled', cancel_reason=None)
             st.rerun()
         return
 
     # Active card (scheduled/arrived) — show ยืนยัน / ยกเลิก buttons
-    st.markdown(f"""
-    <div class="case-card" style="background:#fff0f3;border-left:5px solid #c62828;">
-        <div><span class="pill pill-after">🌙 นอกเวลา</span></div>
-        <div style="margin-top:6px;">
-            <span class="pt-name">{name_d}</span>
-            <span class="pt-hn">HN: {hn_d}</span>
-        </div>
-        {_aft_diag}
-        <div class="pt-proc">{proc_d}</div>
-        <div class="pt-meta">แพทย์: {surg_d}</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="case-card" style="background:#fff0f3;border-left:5px solid #c62828;">
+<div><span class="pill pill-after">🌙 นอกเวลา</span></div>
+<div style="margin-top:6px;">
+<span class="pt-name">{name_d}</span>
+<span class="pt-hn">HN: {hn_d}</span>
+</div>{_aft_diag}
+<div class="pt-proc">{proc_d}</div>
+<div class="pt-meta">แพทย์: {surg_d}</div>
+</div>""", unsafe_allow_html=True)
 
     # === ยืนยัน flow (expanded) ===
     if st.session_state.get(f'aft_confirming_{cid}'):
@@ -725,18 +719,16 @@ def _render_case(row):
     diag_d = row.get('diagnosis') or ''
     diag_html = f'<div class="pt-diag" style="text-decoration:{text_deco};color:#555;font-size:12px;margin-top:2px;">Dx: {diag_d}</div>' if diag_d and diag_d.strip() not in ('', '-') else ''
 
-    st.markdown(f"""
-    <div class="case-card {card_cls}">
-        <div>{pill_html}</div>
-        <div style="margin-top:6px;text-decoration:{text_deco};">
-            <span class="pt-name">{name_d}</span>
-            <span class="pt-hn">HN: {hn_d}</span>
-        </div>
-        {diag_html}
-        <div class="pt-proc" style="text-decoration:{text_deco};">{proc_d}</div>
-        <div class="pt-meta">แพทย์: {surg_d}  ·  สาขา: {div_d}</div>
-        {_ai_badge(row)}
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="case-card {card_cls}">
+<div>{pill_html}</div>
+<div style="margin-top:6px;text-decoration:{text_deco};">
+<span class="pt-name">{name_d}</span>
+<span class="pt-hn">HN: {hn_d}</span>
+</div>{diag_html}
+<div class="pt-proc" style="text-decoration:{text_deco};">{proc_d}</div>
+<div class="pt-meta">แพทย์: {surg_d}  ·  สาขา: {div_d}</div>
+{_ai_badge(row)}
+</div>""", unsafe_allow_html=True)
 
     # Timeline as separate markdown (avoid Streamlit HTML sanitization)
     if timeline:
@@ -1572,6 +1564,14 @@ def _tab_summary():
             dl1, dl2 = st.columns(2)
             with dl1:
 
+                xlsx_data = export_summary_excel(d_from, d_to)
+                st.download_button(
+                    '📊 ดาวน์โหลดสรุปสถิติ (Excel+กราฟ)',
+                    xlsx_data,
+                    'minor_or_summary.xlsx',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    use_container_width=True,
+                )
                 xlsx_data = export_summary_excel(d_from, d_to)
                 st.download_button(
                     '📊 ดาวน์โหลดสรุปสถิติ (Excel+กราฟ)',
