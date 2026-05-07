@@ -604,40 +604,147 @@ def _render_historical_analytics(date_from: str, date_to: str):
     col_left, col_right = st.columns(2)
 
     with col_left:
-        st.markdown('<div class="section-title">🔥 ช่วงเวลาที่ยุ่ง (นาทีที่ห้องถูกใช้)</div>',
+        st.markdown('<div class="section-title">🔥 ภาระงานห้องผ่าตัดเล็ก (เฉลี่ยเคสต่อครั้ง)</div>',
                     unsafe_allow_html=True)
         hm = data['heatmap_df']
-        if not hm.empty:
+        dow_counts = data.get('dow_counts', {})
+        if not hm.empty and dow_counts:
             _THAI_DAYS = ['จันทร์','อังคาร','พุธ','พฤหัสฯ','ศุกร์','เสาร์','อาทิตย์']
-            pivot = hm.pivot_table(index='dow', columns='hour', values='n',
-                                   fill_value=0, aggfunc='sum')
+
+            # raw count: เคส (overlapping) ในแต่ละ (dow, hour) รวมทั้งช่วง
+            pivot_total = hm.pivot_table(index='dow', columns='hour', values='n',
+                                         fill_value=0, aggfunc='sum')
             for d in range(5):
-                if d not in pivot.index:
-                    pivot.loc[d] = 0
+                if d not in pivot_total.index:
+                    pivot_total.loc[d] = 0
             for h in range(8, 17):
-                if h not in pivot.columns:
-                    pivot[h] = 0
-            pivot = pivot.reindex(index=range(5), columns=range(8, 17), fill_value=0)
+                if h not in pivot_total.columns:
+                    pivot_total[h] = 0
+            pivot_total = pivot_total.reindex(index=range(5),
+                                              columns=range(8, 17), fill_value=0)
+
+            # avg per occurrence: หารด้วยจำนวน dow ในช่วง
+            # ตัวอย่าง: ศุกร์ 13:00 มี 12 เคสรวมจาก 4 ศุกร์ → 12/4 = 3 เคส/ครั้ง
+            pivot = pivot_total.copy().astype(float)
+            for d in pivot.index:
+                cnt = max(dow_counts.get(int(d), 1), 1)
+                pivot.loc[d] = pivot_total.loc[d] / cnt
+            pivot = pivot.round(1)
+
+            # Format ค่าในช่อง: ว่างเปล่าถ้า 0, อื่น ๆ แสดงเลข (1 ทศนิยมถ้า <1)
+            def _fmt_cell(v):
+                if v == 0: return ''
+                if v < 1:  return f'{v:.1f}'
+                # >= 1 → แสดงทศนิยม 1 ตำแหน่งเสมอเพื่อความสม่ำเสมอ
+                return f'{v:.1f}'
+
+            text_overlay = [[_fmt_cell(pivot.loc[d, h]) for h in range(8, 17)]
+                            for d in range(5)]
+
+            customdata = []
+            for d_idx in range(5):
+                row_hover = []
+                for h in range(8, 17):
+                    avg = float(pivot.loc[d_idx, h])
+                    total = int(pivot_total.loc[d_idx, h])
+                    n_days = dow_counts.get(d_idx, 0)
+                    if avg == 0:
+                        line = 'ไม่มีเคสในช่วงนี้'
+                    else:
+                        line = (f'เฉลี่ย {avg:.1f} เคส/ครั้ง<br>'
+                                f'(รวม {total} เคส จาก {n_days} '
+                                f'{_THAI_DAYS[d_idx]})')
+                    row_hover.append(line)
+                customdata.append(row_hover)
+
+            # Auto color scale (ยิ่งเคสเยอะ ยิ่งเข้ม) — ใช้ max ของข้อมูลจริง
+            zmax_val = max(float(pivot.values.max()), 1.0)
 
             fig = go.Figure(data=go.Heatmap(
                 z=pivot.values,
                 x=[f'{h}:00' for h in range(8, 17)],
                 y=[_THAI_DAYS[i] for i in range(5)],
                 colorscale='OrRd',
-                colorbar=dict(title='นาที'),
-                hovertemplate='%{y} %{x}<br>ห้องถูกใช้: %{z} นาที<extra></extra>',
+                zmin=0, zmax=zmax_val,
+                colorbar=dict(title='เคสเฉลี่ย'),
+                text=text_overlay,
+                texttemplate='%{text}',
+                textfont=dict(size=11, color='black'),
+                customdata=customdata,
+                hovertemplate=('<b>%{y} เวลา %{x}</b><br>%{customdata}'
+                               '<extra></extra>'),
             ))
             fig.update_layout(
-                margin=dict(t=10, b=10, l=80, r=10), height=240,
+                margin=dict(t=10, b=10, l=80, r=10), height=260,
                 xaxis_title='ชั่วโมง', yaxis=dict(autorange='reversed'),
             )
             st.plotly_chart(fig, use_container_width=True)
-            st.caption(
-                "💡 นับ **นาทีที่ห้องถูกใช้** (room-in → room-out) "
-                "กระจายลงในแต่ละ hour bucket ตามเวลาจริง — เคสยาวจะถ่วงน้ำหนักมากกว่าเคสสั้น"
-            )
+
+            # ── สรุปภาพรวมอัตโนมัติ (ตัวเลขล้วน ไม่มี label "ยุ่ง/ว่าง") ──
+            morning = pivot[[h for h in range(8, 12)
+                             if h in pivot.columns]].values.mean()
+            noon = pivot[[h for h in range(12, 15)
+                          if h in pivot.columns]].values.mean()
+            evening = pivot[[h for h in range(15, 17)
+                             if h in pivot.columns]].values.mean()
+
+            flat = pivot.stack()
+            peak_idx = flat.idxmax() if flat.max() > 0 else None
+            quiet_nonzero = flat[flat > 0]
+            quiet_idx = quiet_nonzero.idxmin() if not quiet_nonzero.empty else None
+
+            insight_html = f"""
+<div style="background:#f5f5f5;border-radius:8px;padding:12px 14px;
+            margin-top:8px;font-size:13px;line-height:1.7;">
+  <div style="font-weight:700;color:#333;margin-bottom:6px;">
+    📊 สรุปภาพรวม (เคสเฉลี่ยต่อครั้ง)
+  </div>
+  🌅 <b>ตอนเช้า</b> (8-11): {morning:.1f} เคส/ชม.<br>
+  🌞 <b>ตอนกลางวัน</b> (12-14): {noon:.1f} เคส/ชม.<br>
+  🌆 <b>ตอนบ่าย-เย็น</b> (15-17): {evening:.1f} เคส/ชม.<br>
+"""
+            if peak_idx is not None:
+                insight_html += (
+                    '  <hr style="margin:8px 0;border:none;'
+                    'border-top:1px solid #ddd;">\n'
+                    f'  🔝 <b>เคสเยอะสุด</b>: {_THAI_DAYS[peak_idx[0]]} '
+                    f'{peak_idx[1]}:00 (เฉลี่ย {float(flat[peak_idx]):.1f} '
+                    f'เคส/{_THAI_DAYS[peak_idx[0]]})<br>\n'
+                )
+            if quiet_idx is not None:
+                insight_html += (
+                    f'  😴 <b>เคสน้อยสุด</b> (ที่มีเคส): '
+                    f'{_THAI_DAYS[quiet_idx[0]]} {quiet_idx[1]}:00 '
+                    f'(เฉลี่ย {float(flat[quiet_idx]):.1f} '
+                    f'เคส/{_THAI_DAYS[quiet_idx[0]]})\n'
+                )
+            insight_html += "</div>"
+            st.markdown(insight_html, unsafe_allow_html=True)
+
+            with st.expander("💡 วิธีอ่านกราฟนี้", expanded=False):
+                st.markdown("""
+**ตัวเลขในช่อง = เฉลี่ยจำนวนเคสที่อยู่ในช่วงเวลานั้น ๆ ของวันนั้น ๆ**
+
+**วิธีคำนวณ:** นับเคสที่คร่อมชั่วโมงนั้น (เคสที่ทำคร่อม 13:18-14:50
+จะถูกนับใน slot 13:00 และ 14:00) แล้วหารด้วยจำนวนวันนั้น ๆ ในช่วงที่เลือก
+
+**ตัวอย่าง:**
+> "ศุกร์ 13:00 = 3.0" หมายความว่า ในช่วงที่เลือก (เช่น 4 สัปดาห์)
+> ทุกวันศุกร์ตอน 13:00 มีเคสอยู่ในห้องผ่าตัดเฉลี่ย **3 เคส**
+
+**ตีความสี:** ยิ่งสีเข้ม = เคสยิ่งเยอะในช่วงนั้น
+- ⬜ ขาว/อ่อนมาก → เคสน้อย หรือไม่มีเคส
+- 🟧 ส้มอ่อน → เคสปานกลาง
+- 🟥 ส้มเข้ม → เคสเยอะ
+- 🟫 แดงเข้ม → เคสเยอะที่สุดในช่วงเวลาที่เลือก
+
+**ใช้ประโยชน์:**
+- 📅 ดูว่า**ภาระงานหนักช่วงไหน** ของสัปดาห์
+- 🗓️ หา **ช่วงเคสน้อย** เพื่อจองเคสเพิ่ม / นัด standby case
+- 📈 ดู pattern ของหน่วย — เปรียบเทียบวัน/ช่วงเวลา
+                """)
         else:
-            st.caption("ยังไม่มีข้อมูลเวลา (ต้องมีทั้ง in_or_at และ op_end_at)")
+            st.caption("ยังไม่มีข้อมูลเวลา (ต้องมีเคสที่กดปุ่ม 'เข้าห้อง' และ 'เสร็จ' แล้ว)")
 
     with col_right:
         st.markdown('<div class="section-title">🏥 สาขาที่ผ่าตัดเยอะ</div>', unsafe_allow_html=True)

@@ -1416,11 +1416,10 @@ def get_historical_analytics(date_from=None, date_to=None):
         peak_date = peak_row['op_date']
         peak_count = int(peak_row['n_cases'])
 
-    # Heatmap "ช่วงเวลาที่ยุ่ง" — Level 3 OR utilization
-    # ใช้ in_or_at (room-in / wheels-in) → op_end_at (room-out / wheels-out)
-    # คำนวณนาทีที่ห้องถูก lock จริงในแต่ละ hour bucket (distribute across hours)
-    # ตัวอย่าง: เคส 9:18 → 11:50  →  9:00 += 42min, 10:00 += 60min, 11:00 += 50min
-    # อ้างอิง: AORN/JCAHO "OR utilization minutes" benchmark
+    # Heatmap "ภาระงานห้องผ่าตัดเล็ก" — นับเคสที่อยู่ในแต่ละ (dow, hour)
+    # เคสคร่อมชั่วโมงจะถูกนับในทุก hour bucket ที่มันคร่อม
+    # ตัวอย่าง: เคส 13:18 → 14:50  → นับ +1 ใน slot 13:00 และ +1 ใน slot 14:00
+    # ที่ frontend จะหารด้วยจำนวน dow ในช่วง → ได้ "เฉลี่ย X เคสต่อครั้ง"
     hour_df = pd.read_sql_query(
         f"SELECT op_date, in_or_at, op_end_at FROM cases WHERE {where_sql} "
         f"AND in_or_at IS NOT NULL AND op_end_at IS NOT NULL",
@@ -1443,23 +1442,17 @@ def get_historical_analytics(date_from=None, date_to=None):
             dow = pd.to_datetime(op_date).dayofweek
         except (ValueError, TypeError):
             continue
-        # Distribute minutes across hour buckets the case spans
-        cur = t_start
+        # ทุก hour bucket ที่เคสคร่อม — นับ +1 ครั้ง
+        cur = t_start.replace(minute=0, second=0, microsecond=0)
         while cur < t_end:
-            hour_end = (cur.replace(minute=0, second=0, microsecond=0)
-                        + timedelta(hours=1))
-            slot_end = min(hour_end, t_end)
-            mins = (slot_end - cur).total_seconds() / 60.0
-            if mins > 0 and 7 <= cur.hour <= 17:
-                records.append({'dow': dow, 'hour': cur.hour, 'mins': mins})
-            cur = slot_end
+            if 7 <= cur.hour <= 17:
+                records.append({'dow': int(dow), 'hour': int(cur.hour)})
+            cur = cur + timedelta(hours=1)
 
     if records:
-        df_dist = pd.DataFrame(records)
-        heatmap_df = (df_dist.groupby(['dow', 'hour'], as_index=False)
-                              .agg(n=('mins', 'sum')))
-        # Round to int — display as "นาที"
-        heatmap_df['n'] = heatmap_df['n'].round().astype(int)
+        df_rec = pd.DataFrame(records)
+        heatmap_df = (df_rec.groupby(['dow', 'hour']).size()
+                            .reset_index(name='n'))
         if not heatmap_df.empty:
             ps = heatmap_df.loc[heatmap_df['n'].idxmax()]
             peak_hour = int(ps['hour'])
@@ -1487,11 +1480,23 @@ def get_historical_analytics(date_from=None, date_to=None):
     total_cases = conn.execute(f"SELECT COUNT(*) FROM cases WHERE {where_sql}", params).fetchone()[0]
     conn.close()
 
+    # นับจำนวนแต่ละวันในสัปดาห์ที่ปรากฏใน date range
+    # ใช้สำหรับหารหา "ห้องเฉลี่ยที่วิ่งพร้อมกัน" ใน heatmap
+    # เช่น ถ้าช่วงคือ 4 สัปดาห์ → จันทร์มี 4 วัน, ศุกร์มี 4 วัน เป็นต้น
+    dow_counts = {}
+    try:
+        if date_from and date_to:
+            for d in pd.date_range(start=date_from, end=date_to, freq='D'):
+                dow_counts[int(d.dayofweek)] = dow_counts.get(int(d.dayofweek), 0) + 1
+    except (ValueError, TypeError):
+        pass
+
     return {
         'total_cases': total_cases,
         'daily_df': daily_df, 'daily_total': daily_total,
         'peak_date': peak_date, 'peak_count': peak_count,
         'heatmap_df': heatmap_df,
+        'dow_counts': dow_counts,
         'peak_hour': peak_hour, 'peak_hour_count': peak_hour_count,
         'div_df': div_df,
         'top_div_name': top_div_name, 'top_div_count': top_div_count, 'top_div_pct': top_div_pct,
