@@ -39,7 +39,11 @@ _PROC_RULES = [
     (re.compile(
         r'\boff\b.*\b(perm\s*cath|perm|tcc|ijv|hd\s*cath|cath(eter)?)\b',
         re.I), 'Off catheter (PERM/TCC/IJV)'),
+    # "remove cath" / "removal of catheter" (removal-first order)
     (re.compile(r'\b(remove|removal)\b.*\bcath(eter)?\b', re.I),
+        'Off catheter (PERM/TCC/IJV)'),
+    # "PERM/TCC catheter removal" (catheter-first order)
+    (re.compile(r'\bcath(eter)?\b.*\b(remove|removal|off)\b', re.I),
         'Off catheter (PERM/TCC/IJV)'),
 
     # Nail extraction (รวม partial / total / specific toe)
@@ -49,8 +53,8 @@ _PROC_RULES = [
     # ESWL
     (re.compile(r'\beswl\b', re.I), 'ESWL'),
 
-    # I&D — Incision & Drainage
-    (re.compile(r'\bi\s*[&+]\s*d\b|\bincision\s*(and|&)\s*drainage\b', re.I),
+    # I&D — Incision & Drainage (รวมรูปแบบ "I and D", "I & D", "I+D")
+    (re.compile(r'\bi\s*(?:and|&|\+)\s*d\b|\bincision\s*(?:and|&)\s*drainage\b', re.I),
         'I&D'),
 
     # Excision (รวม Excisional biopsy ทั่วไป)
