@@ -232,6 +232,34 @@ def init_db():
 
     conn.close()
 
+    # Auto-import historical data if DB is empty
+    _auto_import_historical()
+
+
+def _auto_import_historical():
+    """Auto-import historical CSV data on first boot (when DB is empty)."""
+    import os as _os
+    conn = get_conn()
+    count = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
+    conn.close()
+    if count > 0:
+        return  # DB already has data, skip
+
+    base = _os.path.dirname(_os.path.abspath(__file__))
+    hist_dir = _os.path.join(base, 'historical_data')
+    sched_path = _os.path.join(hist_dir, 'sched_historical.csv')
+    intra_path = _os.path.join(hist_dir, 'intra_historical.csv')
+
+    if not _os.path.exists(sched_path) or not _os.path.exists(intra_path):
+        return
+
+    try:
+        from import_historical import import_historical
+        n, s, _ = import_historical(sched_path, intra_path, dry_run=False)
+        print(f"[AUTO-IMPORT] Loaded {n} historical cases ({s} skipped)")
+    except Exception as e:
+        print(f"[AUTO-IMPORT] Error: {e}")
+
 
 def _reclassify_patient_type(conn):
     """Re-run patient_type classification on all cases using current logic."""
@@ -1594,7 +1622,6 @@ def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
 # ---------------------------------------------------------------------------
 # Excel export wrapper — delegate to minor_or_export.py
 # ---------------------------------------------------------------------------
-
 def export_summary_excel(date_from=None, date_to=None) -> bytes:
     """Thin wrapper so callers can just pass date range."""
     from minor_or_export import export_summary_excel as _export
