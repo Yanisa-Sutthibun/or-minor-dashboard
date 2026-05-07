@@ -394,6 +394,210 @@ def _render_workload(wl):
     st.markdown(badges_html, unsafe_allow_html=True)
 
 
+def _render_ai_research_tab():
+    """🤖 AI Prediction (งานวิจัย) — แสดงศักยภาพของ AI ทำนายเวลาผ่าตัด
+
+    แสดง 5 ส่วน:
+    1. KPI Cards (4): n, MAE, % within ±10 min, R²
+    2. Filter Controls (หัตถการ, แพทย์)
+    3. Scatter plot (predicted vs actual)
+    4. Error distribution histogram
+    5. Top 5 worst predictions table
+    """
+    st.markdown('<div class="section-title">🤖 AI Prediction Performance</div>',
+                unsafe_allow_html=True)
+
+    # ── ดึงข้อมูล AI predictions ทั้งหมด (ทุกช่วงเวลา) ──
+    summary = get_summary(date_from=None, date_to=None)
+    ai_df = summary.get('ai_df')
+    if ai_df is None or len(ai_df) == 0:
+        st.info("ยังไม่มีข้อมูล AI prediction — ต้องมีเคสที่ทำเสร็จแล้ว "
+                "และมีทั้ง ai_predicted_min และ actual_duration_min")
+        return
+
+    ai_df = ai_df.copy()
+    ai_df['error'] = ai_df['ai_predicted_min'] - ai_df['actual_duration_min']
+    ai_df['abs_error'] = ai_df['error'].abs()
+    ai_df['pct_error'] = (ai_df['abs_error']
+                          / ai_df['actual_duration_min'].replace(0, np.nan)
+                          * 100)
+
+    # ── Filter Controls (หัตถการ + แพทย์) ──
+    proc_options = sorted(ai_df['procedure_name'].dropna().unique().tolist())
+    surg_options = sorted(ai_df['surgeon_name'].dropna().unique().tolist())
+
+    f1, f2 = st.columns(2)
+    with f1:
+        sel_procs = st.multiselect(
+            "🔬 หัตถการ", proc_options, default=[],
+            placeholder="ทั้งหมด — เลือกเพื่อกรอง",
+            key="ai_filter_proc",
+        )
+    with f2:
+        sel_surgs = st.multiselect(
+            "👨‍⚕️ แพทย์", surg_options, default=[],
+            placeholder="ทั้งหมด — เลือกเพื่อกรอง",
+            key="ai_filter_surg",
+        )
+
+    df = ai_df.copy()
+    if sel_procs:
+        df = df[df['procedure_name'].isin(sel_procs)]
+    if sel_surgs:
+        df = df[df['surgeon_name'].isin(sel_surgs)]
+
+    n = len(df)
+    if n == 0:
+        st.warning("ไม่มีเคสที่ตรงกับ filter ที่เลือก")
+        return
+
+    # ── คำนวณ metrics ──
+    mae = float(df['abs_error'].mean())
+    rmse = float(np.sqrt((df['error'] ** 2).mean()))
+    bias = float(df['error'].mean())
+    within_10 = int((df['abs_error'] <= 10).sum())
+    pct_within_10 = round(within_10 / n * 100, 1) if n > 0 else 0
+    # R² computation
+    actual = df['actual_duration_min'].astype(float)
+    pred = df['ai_predicted_min'].astype(float)
+    ss_res = float(((actual - pred) ** 2).sum())
+    ss_tot = float(((actual - actual.mean()) ** 2).sum())
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+
+    # ── Judgment label & color ──
+    def _judge_mae(v):
+        if v <= 10: return ('🟢 ดีมาก', '#43a047')
+        if v <= 20: return ('🟡 ใช้ได้', '#fb8c00')
+        return ('🔴 ต้องปรับ', '#e53935')
+
+    def _judge_pct(v):
+        if v >= 80: return ('🟢 ดีมาก', '#43a047')
+        if v >= 60: return ('🟡 ใช้ได้', '#fb8c00')
+        return ('🔴 ต้องปรับ', '#e53935')
+
+    def _judge_r2(v):
+        if v >= 0.7: return ('🟢 ดีมาก', '#43a047')
+        if v >= 0.5: return ('🟡 ใช้ได้', '#fb8c00')
+        return ('🔴 ต้องปรับ', '#e53935')
+
+    mae_label, mae_color = _judge_mae(mae)
+    pct_label, pct_color = _judge_pct(pct_within_10)
+    r2_label, r2_color = _judge_r2(r2)
+
+    # ── KPI Cards (4 ตัว) ──
+    k1, k2, k3, k4 = st.columns(4)
+    k1.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">เคสที่ใช้ประเมิน</div>
+            <div class="kpi-value" style="color:#1565c0;">{n}</div>
+            <div style="font-size:11px;color:#999;">เคส</div>
+        </div>""", unsafe_allow_html=True)
+    k2.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">ผิดเฉลี่ย (MAE)</div>
+            <div class="kpi-value" style="color:{mae_color};">±{mae:.1f}</div>
+            <div style="font-size:11px;color:#999;">นาที • {mae_label}</div>
+        </div>""", unsafe_allow_html=True)
+    k3.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">ทำนายแม่น (±10 นาที)</div>
+            <div class="kpi-value" style="color:{pct_color};">{pct_within_10:.0f}%</div>
+            <div style="font-size:11px;color:#999;">{within_10}/{n} เคส • {pct_label}</div>
+        </div>""", unsafe_allow_html=True)
+    k4.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">R² Score</div>
+            <div class="kpi-value" style="color:{r2_color};">{r2:.2f}</div>
+            <div style="font-size:11px;color:#999;">model fit • {r2_label}</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Scatter + Histogram (2 columns) ──
+    col_s, col_h = st.columns(2)
+
+    with col_s:
+        st.markdown('<div class="section-title">📍 AI ทำนาย vs เวลาจริง</div>',
+                    unsafe_allow_html=True)
+        # สี categorize ตาม abs_error
+        def _err_color(e):
+            if e <= 10: return 'แม่น (≤10 นาที)'
+            if e <= 20: return 'พอใช้ (11-20)'
+            return 'ผิดมาก (>20)'
+        df_plot = df.copy()
+        df_plot['error_cat'] = df_plot['abs_error'].apply(_err_color)
+        fig = px.scatter(
+            df_plot, x='actual_duration_min', y='ai_predicted_min',
+            color='error_cat',
+            color_discrete_map={
+                'แม่น (≤10 นาที)': '#43a047',
+                'พอใช้ (11-20)':  '#fb8c00',
+                'ผิดมาก (>20)':   '#e53935',
+            },
+            hover_data={'procedure_name': True, 'surgeon_name': True,
+                        'error': ':.0f', 'error_cat': False},
+            labels={'actual_duration_min': 'เวลาจริง (นาที)',
+                    'ai_predicted_min': 'AI ทำนาย (นาที)'},
+        )
+        max_v = float(max(df['actual_duration_min'].max(),
+                          df['ai_predicted_min'].max()) * 1.1)
+        # Perfect prediction line (y = x)
+        fig.add_trace(go.Scatter(
+            x=[0, max_v], y=[0, max_v], mode='lines',
+            line=dict(dash='dash', color='#9e9e9e', width=1.5),
+            name='ทำนายแม่น (y=x)', hoverinfo='skip',
+        ))
+        fig.update_layout(
+            margin=dict(t=10, b=40, l=50, r=10), height=320,
+            legend=dict(orientation='h', y=-0.15),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_h:
+        st.markdown('<div class="section-title">📊 การกระจายของ Error</div>',
+                    unsafe_allow_html=True)
+        fig = px.histogram(
+            df, x='error', nbins=15,
+            labels={'error': 'AI − จริง (นาที)', 'count': 'จำนวนเคส'},
+            color_discrete_sequence=['#5c6bc0'],
+        )
+        fig.add_vline(x=0, line_dash='dash', line_color='#43a047',
+                      annotation_text='ทำนายแม่น',
+                      annotation_position='top right')
+        fig.add_vline(x=bias, line_dash='dot', line_color='#e53935',
+                      annotation_text=f'เฉลี่ย bias = {bias:+.1f}',
+                      annotation_position='top left')
+        fig.update_layout(
+            margin=dict(t=10, b=40, l=40, r=10), height=320,
+            xaxis_title='AI − จริง (นาที)  ←ต่ำกว่า | เกินจริง→',
+            yaxis_title='จำนวนเคส',
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Top 5 Worst Predictions (ไม่มีคอลัมน์แพทย์) ──
+    st.markdown('<div class="section-title">📋 Top 5 เคสที่ทำนายผิดเยอะสุด</div>',
+                unsafe_allow_html=True)
+    top5 = df.nlargest(5, 'abs_error').copy()
+    top5_show = pd.DataFrame({
+        '#': range(1, len(top5) + 1),
+        'หัตถการ': top5['procedure_name'].fillna('-').astype(str).str[:50],
+        'AI ทำนาย (นาที)': top5['ai_predicted_min'].astype(int),
+        'จริง (นาที)': top5['actual_duration_min'].astype(int),
+        'ผิด (นาที)': top5['error'].astype(int).apply(
+            lambda v: f'{v:+d}' + (' (ทำนายเกิน)' if v > 0 else
+                                    (' (ทำนายต่ำ)' if v < 0 else ''))),
+    })
+    st.dataframe(top5_show, use_container_width=True, hide_index=True)
+
+    # Footer note: data scope
+    st.caption(
+        f"📌 ใช้ข้อมูลทั้งหมด {len(ai_df)} เคสที่ทำเสร็จแล้ว "
+        "(ตัดเคสนอกเวลาออก) — Filter ทำงานบน scatter / histogram / Top-5"
+    )
+
+
 def _render_ai_accuracy(op_date: str = None):
     """AI Prediction Accuracy — ส่วนเล็กๆ สำหรับวิจัย."""
     summary = get_summary(date_from=op_date, date_to=op_date)
@@ -986,7 +1190,11 @@ def page_admin():
     """, unsafe_allow_html=True)
 
     # ===== TABS =====
-    tab_today, tab_history = st.tabs(["📋 ภาพรวมวันนี้", "📈 สถิติย้อนหลัง"])
+    tab_today, tab_history, tab_ai = st.tabs([
+        "📋 ภาพรวมวันนี้",
+        "📈 สถิติย้อนหลัง",
+        "🤖 AI Prediction (งานวิจัย)",
+    ])
 
     # -- TAB 1: Today overview --
     with tab_today:
@@ -1341,6 +1549,10 @@ def page_admin():
                                 st.info("🔄 กดปุ่ม Rerun (R) เพื่อโหลดข้อมูลใหม่")
                     except Exception as e:
                         st.error(f"❌ Error: {e}")
+
+    # -- TAB 3: AI Prediction (งานวิจัย) --
+    with tab_ai:
+        _render_ai_research_tab()
 
     # Auto refresh hint
     st.markdown("""
