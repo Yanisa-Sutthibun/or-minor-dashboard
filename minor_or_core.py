@@ -80,12 +80,46 @@ def predict_surgical_time(procedure: str, age: int, surgeon: str = "",
     procedure_clean = procedure.strip().upper() if procedure else "UNKNOWN"
     surgeon_clean = surgeon.strip() if surgeon else 'UNKNOWN'
 
+    # ──────────────────────────────────────────────────────────────────
+    # ลำดับที่ 1: ลองใช้ local history ก่อน (เคสจริงในห้องเล็ก)
+    # ----------------------------------------------------------------------
+    # Smart fallback strategy:
+    #   Tier 1: surgeon × procedure (≥3 เคส) → confidence "สูงมาก"
+    #   Tier 2: procedure only (≥3 เคส)      → confidence "สูง"
+    #   Tier 3 (ลำดับ 2 ใน function): ML model (เดิม)
+    # ----------------------------------------------------------------------
+    # เหตุผล: training data เก็บชื่อหัตถการเป็น ICD-9 ภาษาอังกฤษเต็ม
+    # แต่ user กรอกชื่อสั้นเช่น "ESWL", "Morpheus", "PERM cath"
+    # → fuzzy match ฝั่ง ML ล้มเหลว fallback global_avg=35.5 เสมอ
+    # → ใช้ local history ที่ user กรอกเอง = ตรงกับ workflow จริง = แม่นกว่า
+    # ──────────────────────────────────────────────────────────────────
+    try:
+        from minor_or_db import predict_from_local_history
+        local = predict_from_local_history(procedure, surgeon)
+        if local is not None:
+            return {
+                'predicted_min': local['predicted_min'],
+                'confidence': local['confidence'],
+                'method': local['method_label'],
+                'details': (f'median ของ {local["n_cases"]} เคส '
+                            f'(min={local["min_dur"]} / max={local["max_dur"]} นาที) '
+                            f'• กลุ่ม "{local["canonical"]}"'),
+                'proc_n': local['n_cases'],
+                'surg_n': local['n_cases'] if local['tier'] == 1 else 0,
+                'source': 'local_history',
+                'tier': local['tier'],
+            }
+    except Exception:
+        pass  # ถ้า DB ผิดพลาด ให้ fallback ML model ต่อไป
+
+    # ลำดับที่ 2: ML model (เดิม)
     if not assets['model_loaded'] or assets['model_data'] is None:
         return {
             'predicted_min': 30, 'confidence': 'ต่ำ',
             'method': 'ค่าเริ่มต้น (ไม่มี Model)',
-            'details': 'ไม่พบ minor_or_model.pkl',
+            'details': 'ไม่พบ minor_or_model.pkl และไม่มีประวัติเคสในห้องเล็กพอ',
             'proc_n': 0, 'surg_n': 0,
+            'source': 'default',
         }
 
     data = assets['model_data']
@@ -194,6 +228,8 @@ def predict_surgical_time(procedure: str, age: int, surgeon: str = "",
             'surg_proc_n': int(surg_proc_n),
             'proc_resolved': proc_resolved if proc_fuzzy_used else None,
             'surg_resolved': surg_resolved if surg_fuzzy_used else None,
+            'source': 'ml_model',
+            'tier': 3,
         }
     except Exception as e:
         return {
@@ -201,6 +237,8 @@ def predict_surgical_time(procedure: str, age: int, surgeon: str = "",
             'method': 'Fallback (proc_avg)',
             'details': f'Model predict error: {str(e)[:40]}',
             'proc_n': 0, 'surg_n': 0,
+            'source': 'fallback_proc_avg',
+            'tier': 3,
         }
 
 # ============================================================================

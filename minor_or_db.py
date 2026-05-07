@@ -2,13 +2,192 @@
 Minor OR Database — SQLite Adapter v2 (Workflow Edition)
 Status flow: scheduled → arrived → in_or → post_op → discharged | cancelled
 """
+import re
 import sqlite3
 import os
+import statistics
 import pandas as pd
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(_SCRIPT_DIR, 'minor_or.db')
+
+
+# ============================================================================
+# Procedure name fuzzy normalization (shared across heatmap + AI prediction)
+# ----------------------------------------------------------------------------
+# รวม "หัตถการ" ที่เขียนต่างกันแต่หมายถึงสิ่งเดียวกัน เช่น
+#   - off PERM cath / off TCC Rt IJV  →  "Off catheter (PERM/TCC/IJV)"
+#   - QS / Q-Switch / ND-YAG          →  "Q-Switch ND:YAG"
+#   - excision / Excision             →  "Excision"
+# ============================================================================
+
+_PROC_RULES = [
+    # Off catheter (PERM cath / TCC / IJV)
+    (re.compile(
+        r'\boff\b.*\b(perm\s*cath|perm|tcc|ijv|hd\s*cath|cath(eter)?)\b',
+        re.I), 'Off catheter (PERM/TCC/IJV)'),
+    # "remove cath" / "removal of catheter" (removal-first order)
+    (re.compile(r'\b(remove|removal)\b.*\bcath(eter)?\b', re.I),
+        'Off catheter (PERM/TCC/IJV)'),
+    # "PERM/TCC catheter removal" (catheter-first order)
+    (re.compile(r'\bcath(eter)?\b.*\b(remove|removal|off)\b', re.I),
+        'Off catheter (PERM/TCC/IJV)'),
+
+    # Nail extraction (รวม partial / total / specific toe)
+    (re.compile(r'nail\s*(extract(ion)?|removal|avulsion)', re.I),
+        'Nail extraction'),
+
+    # ESWL
+    (re.compile(r'\beswl\b', re.I), 'ESWL'),
+
+    # I&D — Incision & Drainage (รวมรูปแบบ "I and D", "I & D", "I+D")
+    (re.compile(r'\bi\s*(?:and|&|\+)\s*d\b|\bincision\s*(?:and|&)\s*drainage\b', re.I),
+        'I&D'),
+
+    # Excision (รวม Excisional biopsy ทั่วไป)
+    (re.compile(r'\bexcis(ion|e|ional)\b', re.I), 'Excision'),
+
+    # EC
+    (re.compile(r'^\s*ec\s*$|\bec\b\s*(case|biopsy)?', re.I), 'EC'),
+
+    # Morpheus (laser)
+    (re.compile(r'\bmorpheus\b', re.I), 'Morpheus'),
+
+    # Q-Switch ND:YAG laser
+    (re.compile(r'\b(?:qs|q[\s\-]*switch|nd[\s:\-]*yag)\b', re.I),
+        'Q-Switch ND:YAG'),
+]
+
+
+def _strip_modifiers(name: str) -> str:
+    """ตัดคำขยายที่ไม่ส่งผลต่อชนิดหัตถการ เช่น Rt/Lt/Right/Left และเลขท้าย."""
+    s = re.sub(r'\b(rt|lt|right|left|bilateral|bil|both)\b\.?', '', name, flags=re.I)
+    s = re.sub(r'\bbig\s*toe\b|\b(1st|2nd|3rd|4th|5th)\s*toe\b', 'toe', s, flags=re.I)
+    s = re.sub(r'\s+\d+\s*$', '', s)              # ลบเลขท้าย เช่น "extraction 2"
+    s = re.sub(r'[\(\)\[\]\.]', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
+def _normalize_procedure_name(name) -> str:
+    """แปลงชื่อหัตถการดิบ → canonical group ตาม rule + cleanup."""
+    if name is None:
+        return 'UNKNOWN'
+    s = str(name).strip()
+    if not s or s.lower() in ('nan', 'none', '-'):
+        return 'UNKNOWN'
+    # Rule-based ก่อน
+    for pat, canonical in _PROC_RULES:
+        if pat.search(s):
+            return canonical
+    # ตัด side / เลขท้าย แล้ว Title Case
+    cleaned = _strip_modifiers(s)
+    if not cleaned:
+        return s
+    # ถ้าเป็นตัวย่อสั้น ๆ ทั้งหมด (≤4 ตัว) เก็บ uppercase ไว้
+    if len(cleaned) <= 4 and cleaned.isalpha():
+        return cleaned.upper()
+    return cleaned[0].upper() + cleaned[1:]
+
+
+# ============================================================================
+# AI prediction helper — local DB history first, ML model fallback
+# ============================================================================
+
+def predict_from_local_history(procedure: str, surgeon: str = None,
+                                min_cases: int = 3) -> dict | None:
+    """ทำนายเวลาผ่าตัดจากประวัติเคสที่ผ่าตัดเสร็จแล้วใน DB ห้องเล็ก
+
+    Tier 1: surgeon × procedure (≥ min_cases)  → confidence "สูงมาก"
+    Tier 2: procedure only (≥ min_cases)       → confidence "สูง"
+    Returns None if insufficient local history (caller should fall back to ML).
+
+    การ match ใช้ _normalize_procedure_name เพื่อรวม variants
+    (เช่น "ESWL Right" + "ESWL" + "ESWL Lt" = canonical "ESWL")
+    """
+    if not procedure or not str(procedure).strip():
+        return None
+
+    target = _normalize_procedure_name(procedure)
+    if target == 'UNKNOWN':
+        return None
+
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT procedure_name, surgeon_name, actual_duration_min
+            FROM cases
+            WHERE status = 'discharged'
+              AND actual_duration_min IS NOT NULL
+              AND actual_duration_min > 0
+        """).fetchall()
+    finally:
+        conn.close()
+
+    # Group local cases by canonical procedure name; keep matches only
+    matching = []  # list of (surgeon_name, duration)
+    for proc_raw, surg_raw, dur in rows:
+        if _normalize_procedure_name(proc_raw) == target:
+            matching.append((str(surg_raw or '').strip(), int(dur)))
+
+    if not matching:
+        return None
+
+    surg_clean = (surgeon or '').strip()
+
+    # Tier 1: surgeon × procedure
+    if surg_clean:
+        surg_durs = [d for s, d in matching if s == surg_clean]
+        if len(surg_durs) >= min_cases:
+            return {
+                'predicted_min': int(round(statistics.median(surg_durs))),
+                'confidence': 'สูงมาก',
+                'tier': 1,
+                'method_label': (f'ประวัติห้องเล็ก '
+                                 f'(หมอ × หัตถการ, n={len(surg_durs)})'),
+                'n_cases': len(surg_durs),
+                'min_dur': min(surg_durs),
+                'max_dur': max(surg_durs),
+                'canonical': target,
+            }
+
+    # Tier 2: any surgeon, this procedure
+    all_durs = [d for _, d in matching]
+    if len(all_durs) >= min_cases:
+        return {
+            'predicted_min': int(round(statistics.median(all_durs))),
+            'confidence': 'สูง',
+            'tier': 2,
+            'method_label': f'ประวัติห้องเล็ก (หัตถการ, n={len(all_durs)})',
+            'n_cases': len(all_durs),
+            'min_dur': min(all_durs),
+            'max_dur': max(all_durs),
+            'canonical': target,
+        }
+
+    return None
+
+
+def get_local_history_stats():
+    """Return summary of how many procedures have ≥3 local cases (for diagnostics)."""
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT procedure_name, surgeon_name, actual_duration_min
+            FROM cases
+            WHERE status = 'discharged'
+              AND actual_duration_min IS NOT NULL
+              AND actual_duration_min > 0
+        """).fetchall()
+    finally:
+        conn.close()
+    counts = {}
+    for proc_raw, _surg, _dur in rows:
+        c = _normalize_procedure_name(proc_raw)
+        counts[c] = counts.get(c, 0) + 1
+    return counts
 
 DIVISIONS = ['ศัลยกรรมทั่วไป','ศัลยกรรมตกแต่ง','ระบบผิวหนัง',
              'ศัลยกรรมระบบทางเดินปัสสาวะ','ศัลยกรรมหู คอ จมูก',

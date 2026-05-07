@@ -17,91 +17,13 @@ from minor_or_db import (
     get_summary, get_nurse_stats, div_name, DIV_CODE_MAP,
     get_historical_analytics, export_cases_csv, export_summary_excel, get_cases,
     get_wait_stats, get_handover_stats,
+    # Procedure-name fuzzy normalization (moved to db layer for sharing
+    # with predict_from_local_history). Same rules apply across heatmap +
+    # AI prediction so groupings stay consistent.
+    _normalize_procedure_name, _PROC_RULES,
 )
 import numpy as np
-import re
 from difflib import SequenceMatcher
-
-
-# ============================================================================
-# Procedure name fuzzy grouping
-# ----------------------------------------------------------------------------
-# รวม "หัตถการ" ที่เขียนต่างกันแต่หมายถึงสิ่งเดียวกัน เช่น
-#   - off PERM cath / off TCC Rt IJV  →  "Off catheter (PERM/TCC/IJV)"
-#   - right big toe partial nail extraction / partial nail extraction  →  "Nail extraction"
-#   - excision / Excision  →  "Excision" (case-insensitive)
-# วิธีการ: rule-based (regex) ก่อน → fuzzy similarity (SequenceMatcher) ทีหลัง
-# ============================================================================
-
-# (compiled regex pattern, canonical name)  — ลำดับสำคัญ! pattern แรกที่ match จะถูกใช้
-_PROC_RULES = [
-    # Off catheter (PERM cath / TCC / IJV)
-    (re.compile(
-        r'\boff\b.*\b(perm\s*cath|perm|tcc|ijv|hd\s*cath|cath(eter)?)\b',
-        re.I), 'Off catheter (PERM/TCC/IJV)'),
-    # "remove cath" / "removal of catheter" (removal-first order)
-    (re.compile(r'\b(remove|removal)\b.*\bcath(eter)?\b', re.I),
-        'Off catheter (PERM/TCC/IJV)'),
-    # "PERM/TCC catheter removal" (catheter-first order)
-    (re.compile(r'\bcath(eter)?\b.*\b(remove|removal|off)\b', re.I),
-        'Off catheter (PERM/TCC/IJV)'),
-
-    # Nail extraction (รวม partial / total / specific toe)
-    (re.compile(r'nail\s*(extract(ion)?|removal|avulsion)', re.I),
-        'Nail extraction'),
-
-    # ESWL
-    (re.compile(r'\beswl\b', re.I), 'ESWL'),
-
-    # I&D — Incision & Drainage (รวมรูปแบบ "I and D", "I & D", "I+D")
-    (re.compile(r'\bi\s*(?:and|&|\+)\s*d\b|\bincision\s*(?:and|&)\s*drainage\b', re.I),
-        'I&D'),
-
-    # Excision (รวม Excisional biopsy ทั่วไป)
-    (re.compile(r'\bexcis(ion|e|ional)\b', re.I), 'Excision'),
-
-    # EC
-    (re.compile(r'^\s*ec\s*$|\bec\b\s*(case|biopsy)?', re.I), 'EC'),
-
-    # Morpheus (laser)
-    (re.compile(r'\bmorpheus\b', re.I), 'Morpheus'),
-
-    # Q-Switch ND:YAG laser
-    # รวม "QS", "Q-Switch", "Q Switch", "ND-YAG", "ND:YAG", "Nd:YAG", "ND YAG"
-    (re.compile(r'\b(?:qs|q[\s\-]*switch|nd[\s:\-]*yag)\b', re.I),
-        'Q-Switch ND:YAG'),
-]
-
-
-def _strip_modifiers(name: str) -> str:
-    """ตัดคำขยายที่ไม่ส่งผลต่อชนิดหัตถการ เช่น Rt/Lt/Right/Left และเลขท้าย."""
-    s = re.sub(r'\b(rt|lt|right|left|bilateral|bil|both)\b\.?', '', name, flags=re.I)
-    s = re.sub(r'\bbig\s*toe\b|\b(1st|2nd|3rd|4th|5th)\s*toe\b', 'toe', s, flags=re.I)
-    s = re.sub(r'\s+\d+\s*$', '', s)              # ลบเลขท้าย เช่น "extraction 2"
-    s = re.sub(r'[\(\)\[\]\.]', ' ', s)
-    s = re.sub(r'\s+', ' ', s).strip()
-    return s
-
-
-def _normalize_procedure_name(name) -> str:
-    """แปลงชื่อหัตถการดิบ → canonical group ตาม rule + cleanup."""
-    if name is None:
-        return 'UNKNOWN'
-    s = str(name).strip()
-    if not s or s.lower() in ('nan', 'none', '-'):
-        return 'UNKNOWN'
-    # Rule-based ก่อน
-    for pat, canonical in _PROC_RULES:
-        if pat.search(s):
-            return canonical
-    # ตัด side / เลขท้าย แล้ว Title Case
-    cleaned = _strip_modifiers(s)
-    if not cleaned:
-        return s
-    # ถ้าเป็นตัวย่อสั้น ๆ ทั้งหมด (≤4 ตัว) เก็บ uppercase ไว้
-    if len(cleaned) <= 4 and cleaned.isalpha():
-        return cleaned.upper()
-    return cleaned[0].upper() + cleaned[1:]
 
 
 def _fuzzy_merge(df: pd.DataFrame, name_col: str = 'procedure_name',
