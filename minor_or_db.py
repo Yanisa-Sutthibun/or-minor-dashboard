@@ -1416,28 +1416,50 @@ def get_historical_analytics(date_from=None, date_to=None):
         peak_date = peak_row['op_date']
         peak_count = int(peak_row['n_cases'])
 
+    # Heatmap "ช่วงเวลาที่ยุ่ง" — Level 3 OR utilization
+    # ใช้ in_or_at (room-in / wheels-in) → op_end_at (room-out / wheels-out)
+    # คำนวณนาทีที่ห้องถูก lock จริงในแต่ละ hour bucket (distribute across hours)
+    # ตัวอย่าง: เคส 9:18 → 11:50  →  9:00 += 42min, 10:00 += 60min, 11:00 += 50min
+    # อ้างอิง: AORN/JCAHO "OR utilization minutes" benchmark
     hour_df = pd.read_sql_query(
-        f"SELECT op_date, estimated_time, in_or_at FROM cases WHERE {where_sql}",
+        f"SELECT op_date, in_or_at, op_end_at FROM cases WHERE {where_sql} "
+        f"AND in_or_at IS NOT NULL AND op_end_at IS NOT NULL",
         conn, params=params)
 
-    def _extract_hour(row):
-        ior = row.get('in_or_at')
-        if ior and isinstance(ior, str) and len(ior) >= 13:
-            try:
-                return int(ior[11:13])
-            except (ValueError, IndexError):
-                pass
-        try:
-            return int(float(row.get('estimated_time', 0))) // 10000
-        except (ValueError, TypeError):
-            return 9
-
     peak_hour, peak_hour_count = 9, 0
-    if not hour_df.empty:
-        hour_df['hour'] = hour_df.apply(_extract_hour, axis=1)
-        hour_df['hour'] = hour_df['hour'].clip(7, 17)
-        hour_df['dow'] = pd.to_datetime(hour_df['op_date']).dt.dayofweek
-        heatmap_df = hour_df.groupby(['dow', 'hour']).size().reset_index(name='n')
+    records = []
+    for _, row in hour_df.iterrows():
+        op_date = row.get('op_date')
+        if not op_date:
+            continue
+        try:
+            t_start = datetime.strptime(row['in_or_at'], '%Y-%m-%d %H:%M:%S')
+            t_end = datetime.strptime(row['op_end_at'], '%Y-%m-%d %H:%M:%S')
+        except (ValueError, TypeError):
+            continue
+        if t_end <= t_start:
+            continue
+        try:
+            dow = pd.to_datetime(op_date).dayofweek
+        except (ValueError, TypeError):
+            continue
+        # Distribute minutes across hour buckets the case spans
+        cur = t_start
+        while cur < t_end:
+            hour_end = (cur.replace(minute=0, second=0, microsecond=0)
+                        + timedelta(hours=1))
+            slot_end = min(hour_end, t_end)
+            mins = (slot_end - cur).total_seconds() / 60.0
+            if mins > 0 and 7 <= cur.hour <= 17:
+                records.append({'dow': dow, 'hour': cur.hour, 'mins': mins})
+            cur = slot_end
+
+    if records:
+        df_dist = pd.DataFrame(records)
+        heatmap_df = (df_dist.groupby(['dow', 'hour'], as_index=False)
+                              .agg(n=('mins', 'sum')))
+        # Round to int — display as "นาที"
+        heatmap_df['n'] = heatmap_df['n'].round().astype(int)
         if not heatmap_df.empty:
             ps = heatmap_df.loc[heatmap_df['n'].idxmax()]
             peak_hour = int(ps['hour'])

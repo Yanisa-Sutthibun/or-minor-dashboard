@@ -560,11 +560,17 @@ def _render_historical_analytics(date_from: str, date_to: str):
             <div style="font-size:12px;color:#999;">{data['peak_count']} เคส</div>
         </div>""", unsafe_allow_html=True)
     with c3:
+        # Peak-hour KPI now reports OR-occupancy minutes (Level-3 utilization)
+        _phc = data['peak_hour_count']
+        if _phc >= 60:
+            _phc_label = f"{_phc//60} ชม. {_phc%60} นาที"
+        else:
+            _phc_label = f"{_phc} นาที"
         st.markdown(f"""
         <div class="kpi-card">
             <div class="kpi-label">ช่วงยุ่งสุด</div>
             <div class="kpi-value" style="color:#e65100;font-size:22px;">{data['peak_hour']:02d}:00</div>
-            <div style="font-size:12px;color:#999;">{data['peak_hour_count']} เคส</div>
+            <div style="font-size:12px;color:#999;">ห้องถูกใช้ {_phc_label}</div>
         </div>""", unsafe_allow_html=True)
     with c4:
         st.markdown(f"""
@@ -598,7 +604,8 @@ def _render_historical_analytics(date_from: str, date_to: str):
     col_left, col_right = st.columns(2)
 
     with col_left:
-        st.markdown('<div class="section-title">🔥 ช่วงเวลาที่ยุ่ง</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🔥 ช่วงเวลาที่ยุ่ง (นาทีที่ห้องถูกใช้)</div>',
+                    unsafe_allow_html=True)
         hm = data['heatmap_df']
         if not hm.empty:
             _THAI_DAYS = ['จันทร์','อังคาร','พุธ','พฤหัสฯ','ศุกร์','เสาร์','อาทิตย์']
@@ -617,15 +624,20 @@ def _render_historical_analytics(date_from: str, date_to: str):
                 x=[f'{h}:00' for h in range(8, 17)],
                 y=[_THAI_DAYS[i] for i in range(5)],
                 colorscale='OrRd',
-                hovertemplate='%{y} %{x}<br>เคส: %{z}<extra></extra>',
+                colorbar=dict(title='นาที'),
+                hovertemplate='%{y} %{x}<br>ห้องถูกใช้: %{z} นาที<extra></extra>',
             ))
             fig.update_layout(
                 margin=dict(t=10, b=10, l=80, r=10), height=240,
                 xaxis_title='ชั่วโมง', yaxis=dict(autorange='reversed'),
             )
             st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "💡 นับ **นาทีที่ห้องถูกใช้** (room-in → room-out) "
+                "กระจายลงในแต่ละ hour bucket ตามเวลาจริง — เคสยาวจะถ่วงน้ำหนักมากกว่าเคสสั้น"
+            )
         else:
-            st.caption("ยังไม่มีข้อมูลเวลา")
+            st.caption("ยังไม่มีข้อมูลเวลา (ต้องมีทั้ง in_or_at และ op_end_at)")
 
     with col_right:
         st.markdown('<div class="section-title">🏥 สาขาที่ผ่าตัดเยอะ</div>', unsafe_allow_html=True)
@@ -1130,6 +1142,85 @@ def page_admin():
                                              use_container_width=True, hide_index=True)
 
                             if btn_apply:
+                                st.info("🔄 กดปุ่ม Rerun (R) เพื่อโหลดข้อมูลใหม่")
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+
+        # =========================================================
+        # Section: Re-import room timestamps (จาก intraop CSV)
+        # =========================================================
+        with st.expander("⏱️ จัดการข้อมูล: Re-import room timestamps", expanded=False):
+            st.caption(
+                "รีเฟรชค่า in_or_at / op_end_at ของเคสที่มีอยู่ใน DB จาก intraop CSV "
+                "(`รอลบ.csv`) — ใช้ **roomtimein** / **roomtimeout** เป็นเวลาห้อง "
+                "(เดิมใช้ opesttime/opendtime ที่เป็น incision/closure ทำให้ heatmap "
+                "'ช่วงเวลาที่ยุ่ง' ไม่ตรงกับ OR utilization จริง)"
+            )
+            intra_file = st.file_uploader(
+                "📄 อัพโหลด intraop CSV (ต้องมี columns: hn, opedate, "
+                "roomtimein, roomtimeout, arrivtime, opusetime)",
+                type=['csv'], key="reimport_intra_csv"
+            )
+            if intra_file is not None:
+                colA2, colB2 = st.columns(2)
+                with colA2:
+                    btn_preview2 = st.button(
+                        "🔍 Preview (Dry-run)", use_container_width=True,
+                        key="btn_reimport_preview"
+                    )
+                with colB2:
+                    btn_apply2 = st.button(
+                        "✅ Apply (อัพเดต DB)", type="primary",
+                        use_container_width=True, key="btn_reimport_apply"
+                    )
+
+                if btn_preview2 or btn_apply2:
+                    import io
+                    intra_file.seek(0)
+                    intra_bytes = intra_file.read()
+                    try:
+                        try:
+                            df_intra = pd.read_csv(io.BytesIO(intra_bytes), encoding='utf-16')
+                        except (UnicodeError, UnicodeDecodeError):
+                            df_intra = pd.read_csv(io.BytesIO(intra_bytes), encoding='utf-8')
+
+                        required = {'hn', 'opedate', 'roomtimein', 'roomtimeout'}
+                        missing = required - set(df_intra.columns)
+                        if missing:
+                            st.error(f"❌ CSV ขาด columns: {missing}")
+                        else:
+                            from import_historical import reimport_timestamps
+                            import tempfile, os as _os
+                            with tempfile.NamedTemporaryFile(
+                                delete=False, suffix='.csv', mode='wb') as tmp:
+                                tmp.write(intra_bytes)
+                                tmp_path = tmp.name
+                            try:
+                                info = reimport_timestamps(
+                                    tmp_path, dry_run=not btn_apply2)
+                            finally:
+                                _os.unlink(tmp_path)
+
+                            mode_label = "✅ Applied" if btn_apply2 else "🔍 Preview"
+                            st.success(
+                                f"{mode_label} — เคสที่จะเปลี่ยน: {info['changed']}, "
+                                f"ไม่เจอใน DB: {info['not_found']}"
+                            )
+                            sample_rows = []
+                            for s in info['samples'][:50]:
+                                if s['changed']:
+                                    sample_rows.append({
+                                        'HN': s['hn'], 'op_date': s['op_date'],
+                                        'in_or_at เดิม': s['old_in_or'] or '-',
+                                        'in_or_at ใหม่': s['new_in_or'] or '-',
+                                        'op_end_at เดิม': s['old_op_end'] or '-',
+                                        'op_end_at ใหม่': s['new_op_end'] or '-',
+                                    })
+                            if sample_rows:
+                                st.markdown("**ตัวอย่างเคสที่จะเปลี่ยน:**")
+                                st.dataframe(pd.DataFrame(sample_rows),
+                                             use_container_width=True, hide_index=True)
+                            if btn_apply2:
                                 st.info("🔄 กดปุ่ม Rerun (R) เพื่อโหลดข้อมูลใหม่")
                     except Exception as e:
                         st.error(f"❌ Error: {e}")

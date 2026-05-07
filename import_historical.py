@@ -179,8 +179,11 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
             status = 'discharged'
             
             arrived_at = _make_timestamp(op_date, i.get('arrivtime'))
-            in_or_at = _make_timestamp(op_date, i.get('opesttime'))
-            op_end_at = _make_timestamp(op_date, i.get('opendtime'))
+            # Use room-in / room-out (wheels-in / wheels-out) — มาตรฐาน OR utilization
+            # ห้องเริ่มยุ่งตั้งแต่คนไข้เข้าห้อง ไม่ใช่ตอนลงมีด
+            # (เดิมใช้ opesttime/opendtime = incision/closure ซึ่งสั้นกว่าจริง ~5-15 นาที)
+            in_or_at = _make_timestamp(op_date, i.get('roomtimein'))
+            op_end_at = _make_timestamp(op_date, i.get('roomtimeout'))
             actual_min = _duration_to_min(i.get('opusetime'))
             
             scrub = str(i.get('nursurgnm', '') or '').strip()
@@ -320,6 +323,78 @@ def reclassify_existing(sched_path: str, dry_run: bool = False):
     }
 
 
+def reimport_timestamps(intra_path: str, dry_run: bool = False):
+    """Re-update room timestamps (arrived_at, in_or_at, op_end_at) and
+    actual_duration_min for cases already in DB, by re-reading the intraop CSV.
+
+    ใช้ตอนเปลี่ยน column mapping ของ in_or_at/op_end_at เช่น เปลี่ยนจาก
+    opesttime/opendtime → roomtimein/roomtimeout — ทำให้ heatmap "ช่วงเวลาที่ยุ่ง"
+    ใช้ค่า room-in/room-out จริง (มาตรฐาน OR utilization)
+    """
+    intra = pd.read_csv(intra_path, encoding='utf-16')
+    intra['_op_date'] = intra['opedate'].apply(_norm_date)
+    intra['_hn'] = intra['hn'].astype(str).str.strip()
+
+    conn = sqlite3.connect(DB_PATH)
+
+    updated = 0
+    not_found = 0
+    changed = 0  # cases where new timestamps differ from old
+    samples = []
+
+    for _, i in intra.iterrows():
+        hn = i['_hn']
+        op_date = i['_op_date']
+        if not op_date:
+            continue
+
+        rows = conn.execute(
+            "SELECT case_id, arrived_at, in_or_at, op_end_at FROM cases "
+            "WHERE op_date=? AND hn=?",
+            (op_date, hn)
+        ).fetchall()
+        if not rows:
+            not_found += 1
+            continue
+
+        new_arrived = _make_timestamp(op_date, i.get('arrivtime'))
+        new_in_or = _make_timestamp(op_date, i.get('roomtimein'))
+        new_op_end = _make_timestamp(op_date, i.get('roomtimeout'))
+        new_actual_min = _duration_to_min(i.get('opusetime'))
+
+        for case_id, old_arrived, old_in_or, old_op_end in rows:
+            same = (old_in_or == new_in_or and old_op_end == new_op_end
+                    and old_arrived == new_arrived)
+            samples.append({
+                'hn': hn, 'op_date': op_date,
+                'old_in_or': old_in_or, 'new_in_or': new_in_or,
+                'old_op_end': old_op_end, 'new_op_end': new_op_end,
+                'changed': not same,
+            })
+            if not same:
+                changed += 1
+            if not dry_run:
+                conn.execute(
+                    """UPDATE cases SET
+                        arrived_at = COALESCE(?, arrived_at),
+                        in_or_at = COALESCE(?, in_or_at),
+                        op_end_at = COALESCE(?, op_end_at),
+                        actual_duration_min = COALESCE(?, actual_duration_min)
+                       WHERE case_id=?""",
+                    (new_arrived, new_in_or, new_op_end, new_actual_min, case_id)
+                )
+                updated += 1
+
+    if not dry_run:
+        conn.commit()
+    conn.close()
+
+    return {
+        'updated': updated, 'not_found': not_found, 'changed': changed,
+        'samples': samples,
+    }
+
+
 if __name__ == '__main__':
     # Default: look for files in same directory
     base = os.path.dirname(os.path.abspath(__file__))
@@ -341,6 +416,24 @@ if __name__ == '__main__':
               f"DB rows not in CSV: {info['not_found']}")
         if input("\nApply these updates? (y/n): ").strip().lower() == 'y':
             info = reclassify_existing(sched, dry_run=False)
+            print(f"Done. Updated {info['updated']} rows.")
+        sys.exit(0)
+
+    # --reimport-times mode: refresh in_or_at / op_end_at จาก roomtimein / roomtimeout
+    if '--reimport-times' in sys.argv:
+        if not os.path.exists(intra):
+            print(f"Need {intra} to read room times")
+            sys.exit(1)
+        print("=== DRY RUN: re-import room timestamps ===")
+        info = reimport_timestamps(intra, dry_run=True)
+        for s in info['samples'][:30]:
+            mark = '  ' if not s['changed'] else '->'
+            print(f"  hn={s['hn']:>12s} op={s['op_date']}  "
+                  f"in_or: {s['old_in_or'] or '-':<20s} {mark} {s['new_in_or'] or '-':<20s}")
+        print(f"\nWill change: {info['changed']} rows, "
+              f"DB rows not in CSV: {info['not_found']}")
+        if input("\nApply these updates? (y/n): ").strip().lower() == 'y':
+            info = reimport_timestamps(intra, dry_run=False)
             print(f"Done. Updated {info['updated']} rows.")
         sys.exit(0)
 
