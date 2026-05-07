@@ -1052,6 +1052,88 @@ def page_admin():
         if st.session_state.get('hist_show') and st.session_state.get('hist_range'):
             _render_historical_analytics(*st.session_state['hist_range'])
 
+        # =========================================================
+        # Section: เครื่องมือจัดการข้อมูล (Reclassify case_category)
+        # =========================================================
+        st.markdown("---")
+        with st.expander("🔧 จัดการข้อมูล: Reclassify case_category", expanded=False):
+            st.caption(
+                "ใช้สำหรับแก้ข้อมูลเก่าที่ import มาแล้ว category ผิด "
+                "(เช่น เคสที่ควรเป็น Walk-in แต่ถูกตั้งเป็น 'เคสนัดหมาย') "
+                "โดยอ่านวันนัด (reqdate) จาก scheduling CSV เทียบกับวันผ่าตัด (opedate)"
+            )
+            csv_file = st.file_uploader(
+                "📄 อัพโหลด scheduling CSV (ต้องมี columns: hn, reqdate, opedate)",
+                type=['csv'], key="reclassify_csv"
+            )
+            if csv_file is not None:
+                colA, colB = st.columns(2)
+                with colA:
+                    btn_preview = st.button(
+                        "🔍 Preview (Dry-run)", use_container_width=True,
+                        key="btn_reclassify_preview"
+                    )
+                with colB:
+                    btn_apply = st.button(
+                        "✅ Apply (อัพเดต DB)", type="primary",
+                        use_container_width=True, key="btn_reclassify_apply"
+                    )
+
+                if btn_preview or btn_apply:
+                    import io
+                    csv_file.seek(0)
+                    csv_bytes = csv_file.read()
+                    try:
+                        # Detect encoding (utf-16 from MSSQL export, else utf-8)
+                        try:
+                            df_csv = pd.read_csv(io.BytesIO(csv_bytes), encoding='utf-16')
+                        except (UnicodeError, UnicodeDecodeError):
+                            df_csv = pd.read_csv(io.BytesIO(csv_bytes), encoding='utf-8')
+
+                        required = {'hn', 'reqdate', 'opedate'}
+                        missing = required - set(df_csv.columns)
+                        if missing:
+                            st.error(f"❌ CSV ขาด columns: {missing}")
+                        else:
+                            # Run reclassify (import only when used)
+                            from import_historical import reclassify_existing
+                            # Save uploaded CSV to a temp file (reclassify_existing reads from path)
+                            import tempfile, os as _os
+                            with tempfile.NamedTemporaryFile(
+                                delete=False, suffix='.csv', mode='wb') as tmp:
+                                tmp.write(csv_bytes)
+                                tmp_path = tmp.name
+                            try:
+                                info = reclassify_existing(tmp_path, dry_run=not btn_apply)
+                            finally:
+                                _os.unlink(tmp_path)
+
+                            mode_label = "✅ Applied" if btn_apply else "🔍 Preview"
+                            st.success(
+                                f"{mode_label} — เปลี่ยนเป็น Walk-in: {info['set_to_walkin']}, "
+                                f"เป็นเคสนัดหมาย: {info['set_to_scheduled']}, "
+                                f"ไม่เปลี่ยน: {info['unchanged']}, "
+                                f"ไม่เจอใน DB: {info['not_found']}"
+                            )
+
+                            # Show sample of changes
+                            sample_rows = []
+                            for hn, od, rd, old, new in info['samples'][:50]:
+                                if old != new:
+                                    sample_rows.append({
+                                        'HN': hn, 'op_date': od, 'reqdate': rd or '-',
+                                        'เดิม': old or '-', 'ใหม่': new,
+                                    })
+                            if sample_rows:
+                                st.markdown("**ตัวอย่างเคสที่จะเปลี่ยน:**")
+                                st.dataframe(pd.DataFrame(sample_rows),
+                                             use_container_width=True, hide_index=True)
+
+                            if btn_apply:
+                                st.info("🔄 กดปุ่ม Rerun (R) เพื่อโหลดข้อมูลใหม่")
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+
     # Auto refresh hint
     st.markdown("""
     <div style="text-align:center;margin-top:24px;padding:8px;color:#9e9e9e;font-size:11px;">
