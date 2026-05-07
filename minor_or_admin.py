@@ -496,27 +496,10 @@ def _render_ai_research_tab():
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Top 5 Worst Predictions (ไม่มีคอลัมน์แพทย์) ──
-    st.markdown('<div class="section-title">📋 Top 5 เคสที่ทำนายผิดเยอะสุด</div>',
-                unsafe_allow_html=True)
-    top5 = df.nlargest(5, 'abs_error').copy()
-    top5_show = pd.DataFrame({
-        '#': range(1, len(top5) + 1),
-        'หัตถการ': top5['procedure_name'].fillna('-').astype(str).str[:50],
-        'AI ทำนาย (นาที)': top5['ai_predicted_min'].astype(int),
-        'จริง (นาที)': top5['actual_duration_min'].astype(int),
-        'ผิด (นาที)': top5['error'].astype(int).apply(
-            lambda v: f'{v:+d}' + (' (ทำนายเกิน)' if v > 0 else
-                                    (' (ทำนายต่ำ)' if v < 0 else ''))),
-    })
-    st.dataframe(top5_show, use_container_width=True, hide_index=True)
-
     # Footer note: data scope
     st.caption(
         f"📌 ใช้ข้อมูลทั้งหมด {len(ai_df)} เคสที่ทำเสร็จแล้ว "
-        "(ตัดเคสนอกเวลาออก) — Filter ทำงานบน scatter / histogram / Top-5"
+        "(ตัดเคสนอกเวลาออก) — Filter ทำงานบน scatter / histogram"
     )
 
 
