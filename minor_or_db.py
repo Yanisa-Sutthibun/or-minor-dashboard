@@ -171,17 +171,7 @@ def predict_from_local_history(procedure: str, surgeon: str = None,
 
 
 def clear_all_cases() -> int:
-    """ลบเคสทั้งหมดในตาราง cases — return จำนวนเคสที่ลบ
-
-    ⚠️ ใช้ระวัง: ทำให้เคสทั้งหมดหายไป (ไม่ย้อนกลับได้)
-
-    ที่ "ไม่" ถูกลบ:
-      - room_settings (settings nurse + ห้อง)
-      - audit_log (history การแก้ไข)
-
-    หลังลบ + reboot Streamlit → _auto_import_historical() จะวิ่งใหม่
-    เพราะ count = 0 → ดึงข้อมูลจาก historical_data/ ด้วยโค้ดล่าสุดอัตโนมัติ
-    """
+    """ลบเคสทั้งหมดในตาราง cases — return จำนวนเคสที่ลบ (เก็บ settings ไว้)"""
     conn = get_conn()
     try:
         n = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
@@ -192,11 +182,63 @@ def clear_all_cases() -> int:
         conn.close()
 
 
+def clear_all_data() -> dict:
+    """ลบข้อมูลทุกอย่างในทุก table (clean wipe) — return จำนวนแต่ละ table
+
+    ⚠️ ใช้ระวัง: ลบหมดจริง — เคส, audit_log, room_settings
+    เหมาะกับการ reset ก่อน upload ข้อมูลใหม่ทั้งหมด
+
+    หลังลบ + reboot Streamlit → _auto_import_historical() จะวิ่งใหม่
+    เพราะ cases count = 0 → ดึงข้อมูลจาก historical_data/ อัตโนมัติ
+    ถ้าไม่อยากให้ auto-import → upload CSV ผ่าน UI ก่อน reboot
+    """
+    conn = get_conn()
+    try:
+        result = {}
+        # นับและลบทีละ table
+        for tbl in ('cases', 'audit_log', 'room_settings'):
+            try:
+                n = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                conn.execute(f"DELETE FROM {tbl}")
+                # reset auto-increment counter ด้วย (ถ้าใช้ INTEGER PRIMARY KEY)
+                conn.execute(f"DELETE FROM sqlite_sequence WHERE name='{tbl}'")
+                result[tbl] = int(n)
+            except sqlite3.OperationalError:
+                # table อาจยังไม่ถูก create ใน schema เก่า — ข้าม
+                result[tbl] = 0
+        conn.commit()
+        # VACUUM ต้องรันนอก transaction
+        conn.isolation_level = None
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+    # ตั้ง flag กัน auto-import วิ่งทับเมื่อ reboot
+    # (จะถูกล้างเมื่อ user upload CSV ผ่าน UI ใน import_schedule)
+    _set_app_setting('skip_auto_import', '1')
+    return result
+
+
 def get_cases_count() -> int:
     """Return total cases count (for confirmation UI before clearing)."""
     conn = get_conn()
     try:
         return int(conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0])
+    finally:
+        conn.close()
+
+
+def get_db_table_counts() -> dict:
+    """Return row count of every relevant table (for clean-wipe preview)."""
+    conn = get_conn()
+    try:
+        out = {}
+        for tbl in ('cases', 'audit_log', 'room_settings'):
+            try:
+                out[tbl] = int(conn.execute(
+                    f"SELECT COUNT(*) FROM {tbl}").fetchone()[0])
+            except sqlite3.OperationalError:
+                out[tbl] = 0
+        return out
     finally:
         conn.close()
 
@@ -426,6 +468,11 @@ def init_db():
             circ_json   TEXT DEFAULT '["","","",""]',
             updated_at  TEXT DEFAULT (datetime('now','localtime'))
         );
+        -- App-level settings (key/value) — used for flags like skip_auto_import
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        );
     """)
 
     # Migration: add columns if upgrading from v1
@@ -446,9 +493,44 @@ def init_db():
     _auto_import_historical()
 
 
+def _get_app_setting(key: str, default: str = '') -> str:
+    """Read an app_settings value (returns default if missing)."""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+    except sqlite3.OperationalError:
+        # table may not exist yet during migration
+        return default
+    finally:
+        conn.close()
+
+
+def _set_app_setting(key: str, value: str) -> None:
+    """Write an app_settings value (upsert)."""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+            (key, str(value)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _auto_import_historical():
-    """Auto-import historical CSV data on first boot (when DB is empty)."""
+    """Auto-import historical CSV data on first boot (when DB is empty).
+
+    ป้องกันด้วย flag `skip_auto_import` ใน app_settings:
+    - ถ้า flag = '1' → ข้าม (เคารพการตัดสินใจของ user ที่กด Clean Wipe)
+    - flag จะถูกล้างอัตโนมัติเมื่อ user upload CSV ผ่าน UI
+    """
     import os as _os
+    if _get_app_setting('skip_auto_import', '0') == '1':
+        print("[AUTO-IMPORT] Skipped — user requested clean DB "
+              "(flag set after Clean Wipe; will clear when user uploads CSV)")
+        return
     conn = get_conn()
     count = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
     conn.close()
@@ -897,6 +979,12 @@ def import_schedule(df: pd.DataFrame, op_date: str) -> int:
 
     conn.commit()
     conn.close()
+    # User upload สำเร็จ → ล้าง flag กัน auto-import (ถ้าเคยกด Clean Wipe ไว้)
+    if count > 0:
+        try:
+            _set_app_setting('skip_auto_import', '0')
+        except Exception:
+            pass
     return count
 
 
@@ -915,6 +1003,11 @@ def add_walkin_case(op_date, name, hn, procedure, surgeon, division,
     cid = cur.lastrowid
     conn.commit()
     conn.close()
+    # User เพิ่ม walk-in สำเร็จ → ล้าง flag กัน auto-import
+    try:
+        _set_app_setting('skip_auto_import', '0')
+    except Exception:
+        pass
     return cid
 
 

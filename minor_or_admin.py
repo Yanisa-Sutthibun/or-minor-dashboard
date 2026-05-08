@@ -1451,47 +1451,59 @@ def page_admin():
                         st.error(f"❌ Error: {e}")
 
         # =========================================================
-        # Section: Clear all cases (DESTRUCTIVE)
+        # Section: Clean wipe DB (DESTRUCTIVE — ลบทุก table)
         # =========================================================
-        with st.expander("🚨 ③ ล้างข้อมูลเคสทั้งหมด (Reset DB)", expanded=False):
-            from minor_or_db import get_cases_count, clear_all_cases
-            n_total = get_cases_count()
+        with st.expander("🚨 ③ ล้าง DB สะอาดหมดจด (Clean Wipe)", expanded=False):
+            from minor_or_db import get_db_table_counts, clear_all_data
+            counts = get_db_table_counts()
+            total_rows = sum(counts.values())
 
             st.error(
                 f"⚠️ **เตือน: การลบนี้ไม่สามารถย้อนกลับได้!**\n\n"
-                f"จะลบเคสทั้งหมด **{n_total} เคส** "
-                "(รวม walk-in ที่เพิ่มผ่าน UI)\n\n"
-                "✅ **ที่จะไม่ถูกลบ:** room_settings, audit_log\n\n"
-                "📌 **หลังลบ:** ไป Streamlit Cloud → manage app → Reboot → "
-                "ระบบจะ auto-import จาก `historical_data/` ด้วยโค้ดล่าสุด "
-                "(case_category, room timestamps จะถูกต้องอัตโนมัติ)"
+                f"จะลบข้อมูล **ทั้งหมด {total_rows} แถว** จากทุก table:\n"
+                f"- 🏥 **cases**: {counts.get('cases', 0)} เคส "
+                "(รวม walk-in ที่เพิ่มผ่าน UI)\n"
+                f"- 📝 **audit_log**: {counts.get('audit_log', 0)} รายการ "
+                "(history การแก้ไข)\n"
+                f"- ⚙️ **room_settings**: {counts.get('room_settings', 0)} แถว "
+                "(nurse + ห้อง)\n\n"
+                "🛡️ **ระบบจะตั้ง flag ป้องกัน auto-import** อัตโนมัติ — "
+                "DB จะอยู่ในสถานะว่างจริงหลัง reboot จนกว่ามุ้กกจะ upload "
+                "ไฟล์ผ่าน UI (flag จะถูกล้างเอง)"
             )
 
-            confirm_clear = st.checkbox(
-                f"ฉันยืนยันว่าต้องการลบเคสทั้งหมด {n_total} เคส",
+            confirm_wipe = st.checkbox(
+                f"ฉันยืนยันว่าต้องการลบ DB ทั้งหมด ({total_rows} แถว)",
                 key="clear_db_confirm",
             )
-            btn_clear = st.button(
-                "🔴 ล้างข้อมูลทั้งหมด",
+            btn_wipe = st.button(
+                "🔴 ล้าง DB ทั้งหมด (Clean Wipe)",
                 type="primary",
-                disabled=not confirm_clear or n_total == 0,
+                disabled=not confirm_wipe or total_rows == 0,
                 use_container_width=True,
                 key="btn_clear_db",
             )
-            if btn_clear and confirm_clear:
+            if btn_wipe and confirm_wipe:
                 try:
-                    n_deleted = clear_all_cases()
+                    result = clear_all_data()
+                    n_total = sum(result.values())
                     st.success(
-                        f"✅ ลบเรียบร้อย — **{n_deleted} เคส** ถูกลบจาก DB"
+                        f"✅ ลบเรียบร้อย — **{n_total} แถว** ถูกลบจาก DB\n\n"
+                        f"- cases: {result.get('cases', 0)} เคส\n"
+                        f"- audit_log: {result.get('audit_log', 0)} รายการ\n"
+                        f"- room_settings: {result.get('room_settings', 0)} แถว"
                     )
                     st.info(
+                        "🛡️ **ตั้ง flag กัน auto-import แล้ว** — reboot ครั้งหน้า "
+                        "จะไม่โหลด historical_data/ ทับ\n\n"
                         "📌 **ขั้นต่อไป:**\n\n"
-                        "1. ไปที่ https://share.streamlit.io/ "
-                        "→ คลิก app `or-minor-dashboard`\n"
-                        "2. คลิกเมนู ⋮ → **Reboot app**\n"
-                        "3. รอ ~1-2 นาที จน status เป็น Running\n"
-                        "4. กลับมา dashboard → ระบบจะ auto-import "
-                        "ข้อมูลใหม่จาก `historical_data/` พร้อมโค้ดล่าสุด"
+                        "1. ไปหน้า **ตารางผ่าตัด** (ทางเมนูซ้าย)\n"
+                        "2. **Upload CSV** ของตารางผ่าตัดที่ต้องการ\n"
+                        "3. flag จะถูกล้างอัตโนมัติเมื่อ upload สำเร็จ\n\n"
+                        "💡 ถ้าอยากให้ auto-import จาก `historical_data/` "
+                        "วิ่งใหม่: ลบ DB อีกครั้ง แล้วอย่า upload — กด reboot — "
+                        "**แต่ flag ยังกันอยู่!** ต้องล้าง flag manual "
+                        "ผ่าน Python console (รายละเอียดถามได้)"
                     )
                 except Exception as e:
                     st.error(f"❌ Error: {e}")
