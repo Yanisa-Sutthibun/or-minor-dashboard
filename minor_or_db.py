@@ -170,6 +170,37 @@ def predict_from_local_history(procedure: str, surgeon: str = None,
     return None
 
 
+def clear_all_cases() -> int:
+    """ลบเคสทั้งหมดในตาราง cases — return จำนวนเคสที่ลบ
+
+    ⚠️ ใช้ระวัง: ทำให้เคสทั้งหมดหายไป (ไม่ย้อนกลับได้)
+
+    ที่ "ไม่" ถูกลบ:
+      - room_settings (settings nurse + ห้อง)
+      - audit_log (history การแก้ไข)
+
+    หลังลบ + reboot Streamlit → _auto_import_historical() จะวิ่งใหม่
+    เพราะ count = 0 → ดึงข้อมูลจาก historical_data/ ด้วยโค้ดล่าสุดอัตโนมัติ
+    """
+    conn = get_conn()
+    try:
+        n = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
+        conn.execute("DELETE FROM cases")
+        conn.commit()
+        return int(n)
+    finally:
+        conn.close()
+
+
+def get_cases_count() -> int:
+    """Return total cases count (for confirmation UI before clearing)."""
+    conn = get_conn()
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0])
+    finally:
+        conn.close()
+
+
 def get_local_history_stats():
     """Return summary of how many procedures have ≥3 local cases (for diagnostics)."""
     conn = get_conn()

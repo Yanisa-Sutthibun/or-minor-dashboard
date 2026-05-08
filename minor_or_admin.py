@@ -1450,6 +1450,52 @@ def page_admin():
                     except Exception as e:
                         st.error(f"❌ Error: {e}")
 
+        # =========================================================
+        # Section: Clear all cases (DESTRUCTIVE)
+        # =========================================================
+        with st.expander("🚨 ③ ล้างข้อมูลเคสทั้งหมด (Reset DB)", expanded=False):
+            from minor_or_db import get_cases_count, clear_all_cases
+            n_total = get_cases_count()
+
+            st.error(
+                f"⚠️ **เตือน: การลบนี้ไม่สามารถย้อนกลับได้!**\n\n"
+                f"จะลบเคสทั้งหมด **{n_total} เคส** "
+                "(รวม walk-in ที่เพิ่มผ่าน UI)\n\n"
+                "✅ **ที่จะไม่ถูกลบ:** room_settings, audit_log\n\n"
+                "📌 **หลังลบ:** ไป Streamlit Cloud → manage app → Reboot → "
+                "ระบบจะ auto-import จาก `historical_data/` ด้วยโค้ดล่าสุด "
+                "(case_category, room timestamps จะถูกต้องอัตโนมัติ)"
+            )
+
+            confirm_clear = st.checkbox(
+                f"ฉันยืนยันว่าต้องการลบเคสทั้งหมด {n_total} เคส",
+                key="clear_db_confirm",
+            )
+            btn_clear = st.button(
+                "🔴 ล้างข้อมูลทั้งหมด",
+                type="primary",
+                disabled=not confirm_clear or n_total == 0,
+                use_container_width=True,
+                key="btn_clear_db",
+            )
+            if btn_clear and confirm_clear:
+                try:
+                    n_deleted = clear_all_cases()
+                    st.success(
+                        f"✅ ลบเรียบร้อย — **{n_deleted} เคส** ถูกลบจาก DB"
+                    )
+                    st.info(
+                        "📌 **ขั้นต่อไป:**\n\n"
+                        "1. ไปที่ https://share.streamlit.io/ "
+                        "→ คลิก app `or-minor-dashboard`\n"
+                        "2. คลิกเมนู ⋮ → **Reboot app**\n"
+                        "3. รอ ~1-2 นาที จน status เป็น Running\n"
+                        "4. กลับมา dashboard → ระบบจะ auto-import "
+                        "ข้อมูลใหม่จาก `historical_data/` พร้อมโค้ดล่าสุด"
+                    )
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
+
     # -- TAB 3: AI Prediction (งานวิจัย) --
     with tab_ai:
         _render_ai_research_tab()
