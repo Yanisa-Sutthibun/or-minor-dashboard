@@ -395,6 +395,174 @@ def reimport_timestamps(intra_path: str, dry_run: bool = False):
     }
 
 
+def _parse_thai_date(s) -> str | None:
+    """Convert Thai BE date '01/05/2569' → ISO '2026-05-01'.
+
+    รองรับทั้ง:
+      - '01/05/2569'    (DD/MM/BE)
+      - '1/5/2569'      (single digit day/month)
+      - datetime/Timestamp objects
+      - 'YYYY-MM-DD'    (already ISO — pass through)
+    """
+    if pd.isna(s):
+        return None
+    # Already a datetime
+    if hasattr(s, 'strftime'):
+        return s.strftime('%Y-%m-%d')
+    s = str(s).strip()
+    if not s:
+        return None
+    # Try ISO first
+    if '-' in s and len(s) >= 10 and s[4] == '-':
+        return s[:10]
+    # Thai BE format DD/MM/YYYY
+    parts = s.split(' ')[0].split('/')
+    if len(parts) != 3:
+        return None
+    try:
+        d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
+        # Buddhist Era → CE if year > 2400
+        if y > 2400:
+            y -= 543
+        return f"{y:04d}-{m:02d}-{d:02d}"
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_int(v) -> int:
+    """Convert numeric value to int safely, returning 0 for NaN/None."""
+    if v is None or pd.isna(v):
+        return 0
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return 0
+
+
+def merge_costs_from_excel(cost_path: str, dry_run: bool = False) -> dict:
+    """Match cost data from OR_Stats Excel → existing cases by (HN, Date).
+
+    Updates `treatment_cost` and `patho_cost` columns.
+    Returns dict with summary: matched, not_found, samples.
+
+    Excel columns expected:
+      - HN          (numeric — float)
+      - Date        (Thai BE date string '01/05/2569')
+      - ราคาผ่าตัด    (treatment cost)
+      - ราคาชิ้นเนื้อ (pathology cost)
+    """
+    df = pd.read_excel(cost_path)
+
+    required = {'HN', 'Date', 'ราคาผ่าตัด', 'ราคาชิ้นเนื้อ'}
+    missing = required - set(df.columns)
+    if missing:
+        return {'error': f'ขาด columns: {missing}',
+                'matched': 0, 'not_found': 0, 'samples': []}
+
+    conn = sqlite3.connect(DB_PATH)
+    matched = 0
+    not_found = 0
+    samples = []
+
+    for _, r in df.iterrows():
+        hn_raw = r['HN']
+        if pd.isna(hn_raw):
+            continue
+        hn = str(int(float(hn_raw))).strip()
+
+        op_iso = _parse_thai_date(r['Date'])
+        if not op_iso:
+            continue
+
+        treat = _safe_int(r['ราคาผ่าตัด'])
+        patho = _safe_int(r['ราคาชิ้นเนื้อ'])
+
+        # Find matching case in DB (could be multiple if same hn/date)
+        rows = conn.execute(
+            "SELECT case_id, procedure_name FROM cases WHERE op_date=? AND hn=?",
+            (op_iso, hn)
+        ).fetchall()
+
+        if not rows:
+            not_found += 1
+            samples.append({
+                'HN': hn, 'Date': op_iso, 'หัตถการ': '(ไม่เจอใน DB)',
+                'ราคาผ่าตัด': treat, 'ราคาชิ้นเนื้อ': patho,
+                'status': 'NOT FOUND',
+            })
+            continue
+
+        for case_id, proc in rows:
+            samples.append({
+                'HN': hn, 'Date': op_iso, 'หัตถการ': str(proc)[:40],
+                'ราคาผ่าตัด': treat, 'ราคาชิ้นเนื้อ': patho,
+                'status': 'MATCHED',
+            })
+            matched += 1
+            if not dry_run:
+                conn.execute(
+                    "UPDATE cases SET treatment_cost=?, patho_cost=? "
+                    "WHERE case_id=?",
+                    (treat, patho, case_id)
+                )
+
+    if not dry_run:
+        conn.commit()
+    conn.close()
+
+    return {'matched': matched, 'not_found': not_found, 'samples': samples}
+
+
+def import_historical_with_costs(sched_path: str, intra_path: str,
+                                  cost_path: str = None,
+                                  dry_run: bool = False) -> dict:
+    """One-shot import: schedule + intraop + (optional) cost Excel.
+
+    1. Run import_historical (sched + intraop) → create cases with
+       proper case_category, room timestamps, status='discharged'
+    2. If cost_path given → merge_costs_from_excel to fill
+       treatment_cost / patho_cost
+    3. Clear skip_auto_import flag (so future reboots can auto-import)
+
+    Returns summary dict with all counts.
+    """
+    # Phase 1: cases (sched + intraop)
+    n_inserted, n_skipped, results = import_historical(
+        sched_path, intra_path, dry_run=dry_run)
+
+    out = {
+        'inserted': n_inserted,
+        'skipped': n_skipped,
+        'sample_results': results[:10],
+        'cost_matched': 0,
+        'cost_not_found': 0,
+        'cost_samples': [],
+    }
+
+    # Phase 2: cost
+    if cost_path:
+        try:
+            cost_info = merge_costs_from_excel(cost_path, dry_run=dry_run)
+            if 'error' in cost_info:
+                out['cost_error'] = cost_info['error']
+            else:
+                out['cost_matched'] = cost_info['matched']
+                out['cost_not_found'] = cost_info['not_found']
+                out['cost_samples'] = cost_info['samples'][:20]
+        except Exception as e:
+            out['cost_error'] = str(e)
+
+    # Phase 3: clear skip_auto_import flag (we have data now!)
+    if not dry_run and n_inserted > 0:
+        try:
+            from minor_or_db import _set_app_setting
+            _set_app_setting('skip_auto_import', '0')
+        except Exception:
+            pass
+
+    return out
+
+
 if __name__ == '__main__':
     # Default: look for files in same directory
     base = os.path.dirname(os.path.abspath(__file__))

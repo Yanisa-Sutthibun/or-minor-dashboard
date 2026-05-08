@@ -1286,12 +1286,125 @@ def page_admin():
             '<span style="font-size:18px;font-weight:700;color:#e65100;">'
             '🛠️ เครื่องมือจัดการข้อมูล (Maintenance)</span>'
             '<div style="font-size:12px;color:#bf360c;margin-top:4px;">'
-            'สำหรับ admin/หัวหน้าพยาบาล: แก้ไขข้อมูลที่ import มาผิด '
-            'โดยไม่ต้องลบ DB — ต้องอัพโหลด CSV ต้นทาง'
+            'สำหรับ admin/หัวหน้าพยาบาล: import / แก้ไขข้อมูล / reset DB'
             '</div></div>',
             unsafe_allow_html=True,
         )
-        with st.expander("🔧 ① Reclassify case_category (เคสนัดหมาย ↔ Walk-in)",
+
+        # =========================================================
+        # ① Bulk Historical Import (sched + intraop + cost)
+        # =========================================================
+        with st.expander(
+                "📦 ① Bulk Historical Import (sched + intraop + cost)",
+                expanded=False):
+            st.caption(
+                "🎯 **Primary import workflow** — Upload 3 ไฟล์พร้อมกัน "
+                "เพื่อสร้างเคสครบสมบูรณ์ในชอตเดียว:\n\n"
+                "✅ case_category (เคสนัดหมาย/Walk-in จาก reqdate)\n"
+                "✅ Room timestamps (in_or_at, op_end_at จาก roomtimein/out)\n"
+                "✅ actual_duration (จาก opusetime)\n"
+                "✅ status='discharged' (เคสผ่าตัดเสร็จแล้ว)\n"
+                "✅ treatment_cost / patho_cost (ถ้ามี cost Excel)"
+            )
+            bulk_sched = st.file_uploader(
+                "📅 Schedule CSV (required) — มี hn, reqdate, opedate, "
+                "icd9cm_name, surgstfnm, division",
+                type=['csv'], key="bulk_sched_csv",
+            )
+            bulk_intra = st.file_uploader(
+                "🏥 Intraop CSV (required) — มี hn, opedate, **roomtimein**, "
+                "**roomtimeout**, arrivtime, opusetime",
+                type=['csv'], key="bulk_intra_csv",
+            )
+            bulk_cost = st.file_uploader(
+                "💰 Cost Excel (optional) — มี HN, Date, ราคาผ่าตัด, ราคาชิ้นเนื้อ",
+                type=['xlsx', 'xls'], key="bulk_cost_xlsx",
+            )
+
+            if bulk_sched and bulk_intra:
+                cb1, cb2 = st.columns(2)
+                with cb1:
+                    btn_bulk_preview = st.button(
+                        "🔍 Preview (Dry-run)", use_container_width=True,
+                        key="btn_bulk_preview")
+                with cb2:
+                    btn_bulk_import = st.button(
+                        "✅ Import (อัพเดต DB)", type="primary",
+                        use_container_width=True, key="btn_bulk_import")
+
+                if btn_bulk_preview or btn_bulk_import:
+                    import tempfile, os as _os
+                    tmp_paths = []
+                    try:
+                        # Save uploaded files to temp paths
+                        for upl, suffix in [(bulk_sched, '.csv'),
+                                            (bulk_intra, '.csv')]:
+                            upl.seek(0)
+                            with tempfile.NamedTemporaryFile(
+                                    delete=False, suffix=suffix,
+                                    mode='wb') as tmp:
+                                tmp.write(upl.read())
+                                tmp_paths.append(tmp.name)
+                        cost_path = None
+                        if bulk_cost:
+                            bulk_cost.seek(0)
+                            with tempfile.NamedTemporaryFile(
+                                    delete=False, suffix='.xlsx',
+                                    mode='wb') as tmp:
+                                tmp.write(bulk_cost.read())
+                                cost_path = tmp.name
+
+                        from import_historical import (
+                            import_historical_with_costs)
+                        info = import_historical_with_costs(
+                            tmp_paths[0], tmp_paths[1], cost_path,
+                            dry_run=not btn_bulk_import)
+
+                        mode = "✅ Imported" if btn_bulk_import else "🔍 Preview"
+                        st.success(
+                            f"{mode} — เคส: **{info['inserted']} เพิ่ม**, "
+                            f"{info['skipped']} ซ้ำ (skip)"
+                        )
+                        if cost_path:
+                            if 'cost_error' in info:
+                                st.warning(
+                                    f"⚠️ Cost Excel: {info['cost_error']}")
+                            else:
+                                st.info(
+                                    f"💰 Cost matched: "
+                                    f"**{info['cost_matched']} เคส**, "
+                                    f"ไม่เจอใน DB: {info['cost_not_found']}"
+                                )
+
+                        # Sample รายชื่อเคสที่ import
+                        if info.get('sample_results'):
+                            st.markdown("**ตัวอย่างเคสที่ import:**")
+                            df_s = pd.DataFrame(info['sample_results'])
+                            st.dataframe(df_s, use_container_width=True,
+                                         hide_index=True)
+
+                        # Sample รายการ cost matching
+                        if info.get('cost_samples'):
+                            st.markdown("**ตัวอย่างการ match cost:**")
+                            df_c = pd.DataFrame(info['cost_samples'][:10])
+                            st.dataframe(df_c, use_container_width=True,
+                                         hide_index=True)
+
+                        if btn_bulk_import:
+                            st.info(
+                                "🔄 กดปุ่ม Rerun (R) บน browser — "
+                                "หรือเปิด tab \"📈 สถิติย้อนหลัง\" ดูข้อมูลใหม่")
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+                    finally:
+                        for p in tmp_paths:
+                            try: _os.unlink(p)
+                            except OSError: pass
+                        if cost_path:
+                            try: _os.unlink(cost_path)
+                            except OSError: pass
+
+        with st.expander("🔧 ② Reclassify case_category (เคสนัดหมาย ↔ Walk-in)",
                          expanded=False):
             st.caption(
                 "ใช้สำหรับแก้ข้อมูลเก่าที่ import มาแล้ว category ผิด "
@@ -1373,7 +1486,7 @@ def page_admin():
         # =========================================================
         # Section: Re-import room timestamps (จาก intraop CSV)
         # =========================================================
-        with st.expander("⏱️ ② Re-import room timestamps (in_or_at / op_end_at)",
+        with st.expander("⏱️ ③ Re-import room timestamps (in_or_at / op_end_at)",
                          expanded=False):
             st.caption(
                 "รีเฟรชค่า in_or_at / op_end_at ของเคสที่มีอยู่ใน DB จาก intraop CSV "
@@ -1453,7 +1566,7 @@ def page_admin():
         # =========================================================
         # Section: Clean wipe DB (DESTRUCTIVE — ลบทุก table)
         # =========================================================
-        with st.expander("🚨 ③ ล้าง DB สะอาดหมดจด (Clean Wipe)", expanded=False):
+        with st.expander("🚨 ④ ล้าง DB สะอาดหมดจด (Clean Wipe)", expanded=False):
             from minor_or_db import get_db_table_counts, clear_all_data
             counts = get_db_table_counts()
             total_rows = sum(counts.values())
