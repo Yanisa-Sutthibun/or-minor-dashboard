@@ -138,9 +138,20 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
         conn.commit()
         existing_cols.add('requested_date')
 
+    skipped_no_date = 0
+    skipped_no_hn = 0
+
     for _, s in sched.iterrows():
         hn = str(s['hn']).strip()
         op_date = s['_date']
+        # Defensive: skip rows missing critical fields
+        # (pandas NaN bypasses `if not x` because NaN is truthy)
+        if pd.isna(op_date) or not op_date or str(op_date).lower() in ('nan', 'none', ''):
+            skipped_no_date += 1
+            continue
+        if not hn or hn.lower() in ('nan', 'none', ''):
+            skipped_no_hn += 1
+            continue
         req_date = _norm_date(s.get('reqdate'))
         case_cat = _classify_case_category(req_date, op_date)
         proc = str(s.get('icd9cm_name', '') or '').strip()
@@ -261,7 +272,12 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
     if not dry_run:
         conn.commit()
     conn.close()
-    
+
+    if skipped_no_date or skipped_no_hn:
+        print(f"[IMPORT] Skipped invalid rows: "
+              f"{skipped_no_date} missing op_date, "
+              f"{skipped_no_hn} missing HN")
+
     return inserted, skipped, results
 
 
