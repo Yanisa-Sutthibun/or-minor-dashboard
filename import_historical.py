@@ -278,6 +278,13 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
               f"{skipped_no_date} missing op_date, "
               f"{skipped_no_hn} missing HN")
 
+    # Stash skip stats on function attribute (accessible to callers like
+    # import_historical_with_costs that want to surface them to the UI)
+    import_historical._last_skip_stats = {
+        'no_date': skipped_no_date,
+        'no_hn': skipped_no_hn,
+    }
+
     return inserted, skipped, results
 
 
@@ -556,10 +563,14 @@ def import_historical_with_costs(sched_path: str, intra_path: str,
     # Phase 1: cases (sched + intraop)
     n_inserted, n_skipped, results = import_historical(
         sched_path, intra_path, dry_run=dry_run)
+    skip_stats = getattr(import_historical, '_last_skip_stats',
+                         {'no_date': 0, 'no_hn': 0})
 
     out = {
         'inserted': n_inserted,
         'skipped': n_skipped,
+        'skipped_no_date': skip_stats.get('no_date', 0),
+        'skipped_no_hn': skip_stats.get('no_hn', 0),
         'sample_results': results[:10],
         'cost_matched': 0,
         'cost_not_found': 0,
@@ -575,7 +586,15 @@ def import_historical_with_costs(sched_path: str, intra_path: str,
             else:
                 out['cost_matched'] = cost_info['matched']
                 out['cost_not_found'] = cost_info['not_found']
-                out['cost_samples'] = cost_info['samples'][:20]
+                # เก็บ NOT_FOUND ทั้งหมด (สำคัญสำหรับ debug
+                # — ถ้า cut ที่ 20 อาจไม่เห็นเคสที่หาย)
+                # MATCHED จำกัด 20 พอ (เพื่อ display ไม่รก)
+                samples = cost_info['samples']
+                not_found_all = [s for s in samples
+                                 if s.get('status') == 'NOT FOUND']
+                matched_first20 = [s for s in samples
+                                   if s.get('status') == 'MATCHED'][:20]
+                out['cost_samples'] = matched_first20 + not_found_all
         except Exception as e:
             out['cost_error'] = str(e)
 

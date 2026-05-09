@@ -1365,29 +1365,56 @@ def page_admin():
                             f"{mode} — เคส: **{info['inserted']} เพิ่ม**, "
                             f"{info['skipped']} ซ้ำ (skip)"
                         )
+
+                        # ── Skip stats: rows ที่ DB ไม่รับเพราะข้อมูลไม่ครบ ──
+                        skip_no_date = info.get('skipped_no_date', 0)
+                        skip_no_hn = info.get('skipped_no_hn', 0)
+                        if skip_no_date or skip_no_hn:
+                            st.warning(
+                                f"⚠️ มี **{skip_no_date + skip_no_hn} row** "
+                                f"ที่ skip เพราะข้อมูลไม่ครบ "
+                                f"(missing op_date: {skip_no_date}, "
+                                f"missing HN: {skip_no_hn})"
+                            )
+
                         if cost_path:
                             if 'cost_error' in info:
                                 st.warning(
                                     f"⚠️ Cost Excel: {info['cost_error']}")
                             else:
+                                cm = info['cost_matched']
+                                cnf = info['cost_not_found']
                                 st.info(
-                                    f"💰 Cost matched: "
-                                    f"**{info['cost_matched']} เคส**, "
-                                    f"ไม่เจอใน DB: {info['cost_not_found']}"
+                                    f"💰 Cost matched: **{cm} เคส**, "
+                                    f"ไม่เจอใน DB: {cnf}"
                                 )
+                                # ⭐ แยกแสดง NOT_FOUND ทั้งหมด (สำคัญ — บอกว่า
+                                # เคสไหนหาย จาก schedule.csv ไม่ครบ
+                                # หรือถูก skip เพราะข้อมูลไม่ครบ)
+                                not_found_rows = [
+                                    s for s in info.get('cost_samples', [])
+                                    if s.get('status') == 'NOT FOUND'
+                                ]
+                                if not_found_rows:
+                                    st.markdown(
+                                        f"**🚨 เคสที่อยู่ใน Cost Excel "
+                                        f"แต่ไม่มีใน DB ({len(not_found_rows)} เคส):**"
+                                    )
+                                    st.caption(
+                                        "เคสเหล่านี้น่าจะอยู่ใน schedule.csv "
+                                        "แต่ถูก skip — ตรวจดูว่ามีข้อมูลครบ "
+                                        "(เช่น opedate, hn) หรือไม่"
+                                    )
+                                    df_nf = pd.DataFrame(not_found_rows)
+                                    st.dataframe(df_nf,
+                                                 use_container_width=True,
+                                                 hide_index=True)
 
                         # Sample รายชื่อเคสที่ import
                         if info.get('sample_results'):
-                            st.markdown("**ตัวอย่างเคสที่ import:**")
+                            st.markdown("**ตัวอย่างเคสที่ import (10 แรก):**")
                             df_s = pd.DataFrame(info['sample_results'])
                             st.dataframe(df_s, use_container_width=True,
-                                         hide_index=True)
-
-                        # Sample รายการ cost matching
-                        if info.get('cost_samples'):
-                            st.markdown("**ตัวอย่างการ match cost:**")
-                            df_c = pd.DataFrame(info['cost_samples'][:10])
-                            st.dataframe(df_c, use_container_width=True,
                                          hide_index=True)
 
                         if btn_bulk_import:
