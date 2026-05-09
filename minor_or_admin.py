@@ -1230,28 +1230,25 @@ def page_admin():
     # -- TAB 2: Historical analytics --
     with tab_history:
         today_dt = _now_bkk().date()
-        today_dt = _now_bkk().date()
 
-        # --- Quick preset buttons ---
-        preset = st.radio(
-            "ช่วงเวลา", ["7 วัน", "30 วัน", "90 วัน", "กำหนดเอง"],
-            horizontal=True, key="hist_period", label_visibility='collapsed',
-        )
-
-        if preset == "7 วัน":
-            default_from = today_dt - timedelta(days=6)
-            default_to = today_dt
-        elif preset == "30 วัน":
+        # --- Date range picker (manual only — preset 7/30/90 ลบออกเพราะ
+        # confusion เรื่อง default range. ผู้ใช้เลือกวันที่เองโดยตรง) ---
+        # Default = ดึงจาก DB เพื่อให้ครอบคลุมทุก data ที่มี
+        try:
+            from minor_or_db import get_conn
+            _conn = get_conn()
+            _row = _conn.execute(
+                "SELECT MIN(op_date), MAX(op_date) FROM cases"
+            ).fetchone()
+            _conn.close()
+            default_from = (datetime.strptime(_row[0], '%Y-%m-%d').date()
+                            if _row and _row[0] else today_dt - timedelta(days=29))
+            default_to = (datetime.strptime(_row[1], '%Y-%m-%d').date()
+                          if _row and _row[1] else today_dt)
+        except Exception:
             default_from = today_dt - timedelta(days=29)
             default_to = today_dt
-        elif preset == "90 วัน":
-            default_from = today_dt - timedelta(days=89)
-            default_to = today_dt
-        else:
-            default_from = today_dt - timedelta(days=29)
-            default_to = today_dt
 
-        # --- Date range picker ---
         col_from, col_to = st.columns(2)
         with col_from:
             sel_from = st.date_input("📅 วันที่เริ่มต้น", value=default_from,
