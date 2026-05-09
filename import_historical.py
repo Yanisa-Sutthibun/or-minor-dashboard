@@ -764,6 +764,12 @@ def import_merged_csv(csv_path: str, dry_run: bool = False) -> dict:
                     row_data[col] = None
             else:
                 s = str(v).strip()
+                # Strip ".0" from float-coerced ID-like fields (Excel/pandas
+                # auto-converts "75" → 75.0). Affects division_code, hn, an, etc.
+                # so they match DIV_CODE_MAP correctly.
+                if (col in ('division_code', 'hn', 'an', 'estimated_time')
+                        and s.endswith('.0')):
+                    s = s[:-2]
                 row_data[col] = s if s and s.lower() not in ('nan', 'none') else None
 
         # Defaults for required NOT NULL
