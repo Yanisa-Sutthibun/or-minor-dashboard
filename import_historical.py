@@ -18,12 +18,22 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'minor_or.db'
 def _classify_case_category(req_iso, op_iso):
     """Return 'เคสนัดหมาย' if booked in advance, else 'Walk-in'.
 
-    req_iso, op_iso: 'YYYY-MM-DD' strings (output of _norm_date) or None.
+    req_iso, op_iso: 'YYYY-MM-DD' strings (output of _norm_date), None,
+    or pandas NaN (float — happens when row missing date).
     """
+    # Defensive: pandas reads missing → NaN (float, not None) which is
+    # truthy! Need explicit pd.isna check before truthiness test, otherwise
+    # str < float crashes in lexicographic compare below.
+    try:
+        if pd.isna(req_iso) or pd.isna(op_iso):
+            return 'Walk-in'
+    except (TypeError, ValueError):
+        pass
     if not req_iso or not op_iso:
         return 'Walk-in'
-    # ISO date strings compare lexicographically
-    return 'เคสนัดหมาย' if req_iso < op_iso else 'Walk-in'
+    # Force both to str — defensive against NaN/numeric/Timestamp slipping through
+    req_s, op_s = str(req_iso), str(op_iso)
+    return 'เคสนัดหมาย' if req_s < op_s else 'Walk-in'
 
 
 def _norm_date(d):
@@ -284,7 +294,8 @@ def reclassify_existing(sched_path: str, dry_run: bool = False):
         hn = s['_hn']
         op_date = s['_op_date']
         req_date = s['_req_date']
-        if not op_date:
+        # pandas NaN check — NaN is truthy in `if not x` so use pd.isna explicitly
+        if pd.isna(op_date) or not op_date:
             continue
         new_cat = _classify_case_category(req_date, op_date)
 
@@ -345,7 +356,7 @@ def reimport_timestamps(intra_path: str, dry_run: bool = False):
     for _, i in intra.iterrows():
         hn = i['_hn']
         op_date = i['_op_date']
-        if not op_date:
+        if pd.isna(op_date) or not op_date:
             continue
 
         rows = conn.execute(
