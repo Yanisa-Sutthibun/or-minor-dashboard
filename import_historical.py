@@ -5,6 +5,8 @@ import_historical.py — รวม scheduling CSV + intraop CSV แล้ว imp
 Case category logic:
     เคสนัดหมาย = reqdate < opedate (booked at least 1 day in advance)
     Walk-in    = reqdate == opedate, missing reqdate, or reqdate > opedate
+
+Plus walk-in import from cost Excel for cases not in schedule.csv.
 """
 import pandas as pd
 import sqlite3
@@ -545,6 +547,493 @@ def merge_costs_from_excel(cost_path: str, dry_run: bool = False) -> dict:
     conn.close()
 
     return {'matched': matched, 'not_found': not_found, 'samples': samples}
+
+
+def _parse_time_str(time_str, date_iso) -> str | None:
+    """Combine 'HH:MM' string + ISO date → 'YYYY-MM-DD HH:MM:00'.
+
+    Returns None if either can't parse.
+    Handles edge cases: '7:40', '07:40', NaN, empty strings.
+    """
+    if pd.isna(time_str) or not date_iso:
+        return None
+    s = str(time_str).strip()
+    if not s or s.lower() in ('nan', 'none'):
+        return None
+    parts = s.split(':')
+    if len(parts) < 2:
+        return None
+    try:
+        h = int(parts[0])
+        m = int(parts[1])
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return f'{date_iso} {h:02d}:{m:02d}:00'
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def import_walkins_from_cost_excel(cost_path: str,
+                                    dry_run: bool = False) -> dict:
+    """สำหรับ rows ใน cost Excel ที่ไม่มีเคสตรงกันใน DB
+    → สร้างเคสใหม่ category='Walk-in', status='discharged'
+    พร้อมข้อมูลเต็มจาก cost Excel (name, operation, surgeon, times, cost).
+
+    Returns dict with summary: inserted, skipped_already_exists, samples.
+    """
+    df = pd.read_excel(cost_path)
+
+    required = {'HN', 'Date'}
+    missing = required - set(df.columns)
+    if missing:
+        return {'error': f'ขาด columns: {missing}',
+                'inserted': 0, 'skipped_already_exists': 0, 'samples': []}
+
+    conn = sqlite3.connect(DB_PATH)
+    # Make sure requested_date column exists
+    existing_cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(cases)").fetchall()}
+    if 'requested_date' not in existing_cols:
+        conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
+        conn.commit()
+
+    inserted = 0
+    skipped = 0
+    samples = []
+
+    for _, r in df.iterrows():
+        hn_raw = r['HN']
+        if pd.isna(hn_raw):
+            continue
+        try:
+            hn = str(int(float(hn_raw))).strip()
+        except (ValueError, TypeError):
+            continue
+
+        op_iso = _parse_thai_date(r['Date'])
+        if not op_iso:
+            continue
+
+        # ข้ามถ้ามีเคสนี้ใน DB อยู่แล้ว
+        existing = conn.execute(
+            "SELECT case_id FROM cases WHERE op_date=? AND hn=?",
+            (op_iso, hn)
+        ).fetchone()
+        if existing:
+            skipped += 1
+            continue
+
+        # ดึงข้อมูลจาก cost Excel
+        name = str(r.get('ชื่อ-สกุลผู้ป่วย', '') or '').strip()
+        proc = str(r.get('Operation', '') or '').strip()
+        if not proc or proc.lower() in ('nan', 'none'):
+            proc = '-'
+        surgeon = str(r.get('แพทย์ทำผ่าตัด', '') or '').strip() or None
+        if surgeon and surgeon.lower() in ('nan', 'none'):
+            surgeon = None
+        scrub = str(r.get('Scrub nurse', '') or '').strip() or None
+        if scrub and scrub.lower() in ('nan', 'none'):
+            scrub = None
+        circ = str(r.get('Circulating nurse', '') or '').strip() or None
+        if circ and circ.lower() in ('nan', 'none'):
+            circ = None
+
+        arrived = _parse_time_str(r.get('เวลารับ'), op_iso)
+        in_or = _parse_time_str(r.get('Op.start'), op_iso)
+        op_end = _parse_time_str(r.get('Op.end'), op_iso)
+        discharged = _parse_time_str(r.get('D/C'), op_iso)
+
+        dur = r.get('Duration (min)')
+        actual_min = int(float(dur)) if pd.notna(dur) else None
+
+        treat = _safe_int(r.get('ราคาผ่าตัด'))
+        patho = _safe_int(r.get('ราคาชิ้นเนื้อ'))
+
+        if not dry_run:
+            conn.execute("""
+                INSERT INTO cases (
+                    op_date, hn, name, procedure_name, surgeon_name,
+                    case_category, patient_type, status,
+                    arrived_at, in_or_at, op_end_at, discharged_at,
+                    actual_duration_min,
+                    scrub_nurse, circ_nurse,
+                    treatment_cost, patho_cost, room_no,
+                    requested_date
+                ) VALUES (?,?,?,?,?,?,?,'discharged',?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                op_iso, hn, name, proc, surgeon,
+                'Walk-in', 'OPD',
+                arrived, in_or, op_end, discharged,
+                actual_min,
+                scrub, circ,
+                treat, patho, 32,
+                op_iso,  # walk-in: requested_date == op_date
+            ))
+            inserted += 1
+
+        samples.append({
+            'HN': hn, 'Date': op_iso,
+            'ชื่อ': name[:25] if name else '-',
+            'Operation': proc[:30],
+            'แพทย์': surgeon or '-',
+            'ราคาผ่าตัด': treat, 'ราคาชิ้นเนื้อ': patho,
+            'Duration': actual_min or 0,
+        })
+
+    if not dry_run:
+        conn.commit()
+        # User เพิ่มเคสสำเร็จ → ล้าง flag กัน auto-import
+        try:
+            from minor_or_db import _set_app_setting
+            _set_app_setting('skip_auto_import', '0')
+        except Exception:
+            pass
+    conn.close()
+
+    return {
+        'inserted': inserted,
+        'skipped_already_exists': skipped,
+        'samples': samples,
+    }
+
+
+def import_merged_csv(csv_path: str, dry_run: bool = False) -> dict:
+    """Import single pre-merged CSV/Excel — columns ตรงกับ DB schema ของ cases.
+
+    ใช้เมื่อ user เตรียมไฟล์ merged แล้ว (e.g. รวม sched+intraop+cost ภายนอก)
+    Required columns: op_date, hn, procedure_name
+    Optional: ทุก column อื่นๆ ที่ cases table มี
+    """
+    # Auto-detect format
+    if csv_path.lower().endswith(('.xlsx', '.xls')):
+        df = pd.read_excel(csv_path)
+    else:
+        try:
+            df = pd.read_csv(csv_path, encoding='utf-8-sig')
+        except (UnicodeError, UnicodeDecodeError):
+            try:
+                df = pd.read_csv(csv_path, encoding='utf-16')
+            except (UnicodeError, UnicodeDecodeError):
+                df = pd.read_csv(csv_path, encoding='utf-8')
+
+    required = {'op_date', 'hn'}
+    missing = required - set(df.columns)
+    if missing:
+        return {'error': f'CSV ขาด columns: {missing}',
+                'inserted': 0, 'skipped': 0}
+
+    conn = sqlite3.connect(DB_PATH)
+    existing_cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(cases)").fetchall()}
+    if 'requested_date' not in existing_cols:
+        conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
+        conn.commit()
+        existing_cols.add('requested_date')
+
+    inserted = skipped_dup = skipped_invalid = 0
+    samples = []
+
+    for _, r in df.iterrows():
+        op_date = r.get('op_date')
+        hn = r.get('hn')
+        if pd.isna(op_date) or pd.isna(hn) or not str(op_date).strip():
+            skipped_invalid += 1
+            continue
+        op_date = str(op_date).strip()
+        hn = str(hn).strip()
+
+        # Skip duplicate
+        if conn.execute("SELECT case_id FROM cases WHERE op_date=? AND hn=?",
+                        (op_date, hn)).fetchone():
+            skipped_dup += 1
+            continue
+
+        # Build row dict, only include columns that exist in cases table
+        row_data = {}
+        for col in df.columns:
+            if col not in existing_cols:
+                continue
+            v = r.get(col)
+            if pd.isna(v):
+                row_data[col] = None
+            elif isinstance(v, (int, float)) and 'cost' in col or col in (
+                    'actual_duration_min', 'wait_min', 'room_no'):
+                try:
+                    row_data[col] = int(float(v))
+                except (ValueError, TypeError):
+                    row_data[col] = None
+            else:
+                s = str(v).strip()
+                row_data[col] = s if s and s.lower() not in ('nan', 'none') else None
+
+        # Defaults for required NOT NULL
+        if not row_data.get('op_date'):
+            row_data['op_date'] = op_date
+        if not row_data.get('hn'):
+            row_data['hn'] = hn
+        if not row_data.get('procedure_name'):
+            row_data['procedure_name'] = '-'
+        if not row_data.get('status'):
+            row_data['status'] = 'discharged'
+
+        if not dry_run:
+            cols = list(row_data.keys())
+            placeholders = ','.join(['?'] * len(cols))
+            sql = (f"INSERT INTO cases ({','.join(cols)}) "
+                   f"VALUES ({placeholders})")
+            conn.execute(sql, [row_data[c] for c in cols])
+            inserted += 1
+
+        if len(samples) < 10:
+            samples.append({
+                'HN': hn, 'op_date': op_date,
+                'หัตถการ': row_data.get('procedure_name', '-')[:30],
+                'cat': row_data.get('case_category', '-'),
+                'ค่าผ่า': row_data.get('treatment_cost', 0),
+            })
+
+    if not dry_run:
+        conn.commit()
+        try:
+            from minor_or_db import _set_app_setting
+            _set_app_setting('skip_auto_import', '0')
+        except Exception:
+            pass
+    conn.close()
+
+    return {
+        'inserted': inserted,
+        'skipped_duplicate': skipped_dup,
+        'skipped_invalid': skipped_invalid,
+        'samples': samples,
+        'columns_used': sorted(set(df.columns) & existing_cols),
+        'columns_ignored': sorted(set(df.columns) - existing_cols),
+    }
+
+
+def import_cost_driven(cost_path: str,
+                        sched_path: str = None,
+                        intra_path: str = None,
+                        dry_run: bool = False) -> dict:
+    """Cost-driven import: Cost Excel เป็น master ของ "เคสที่ผ่าตัดจริง"
+    enrich ด้วยข้อมูลจาก schedule + intraop (ถ้ามี)
+
+    Logic:
+      1. iterate cost Excel → ทุก row = real surgical case
+      2. lookup matching schedule row (HN+Date) → ดึง reqdate, division, age, diag
+      3. lookup matching intraop row (HN+Date) → ดึง precise timestamps
+      4. สร้างเคสรวมข้อมูลจาก 3 แหล่ง
+      5. cases ที่อยู่ใน sched/intraop แต่ไม่ใน cost → SKIP
+         (น่าจะ cancel ก่อนผ่าตัด หรือไม่ได้บันทึกในสมุดสถิติ)
+
+    Returns dict with detailed stats.
+    """
+    cost_df = pd.read_excel(cost_path)
+    if 'HN' not in cost_df.columns or 'Date' not in cost_df.columns:
+        return {'error': 'Cost Excel ขาด columns: HN หรือ Date'}
+
+    # Build sched + intraop lookups
+    sched_lookup = {}
+    if sched_path:
+        sched_df = pd.read_csv(sched_path, encoding='utf-16')
+        sched_df['_date'] = sched_df['opedate'].apply(_norm_date)
+        sched_df['_hn'] = sched_df['hn'].astype(str).str.strip()
+        for _, r in sched_df.iterrows():
+            if pd.isna(r['_date']) or not r['_date']:
+                continue
+            sched_lookup[(r['_hn'], r['_date'])] = r.to_dict()
+
+    intra_lookup = {}
+    if intra_path:
+        intra_df = pd.read_csv(intra_path, encoding='utf-16')
+        intra_df['_date'] = intra_df['opedate'].apply(_norm_date)
+        intra_df['_hn'] = intra_df['hn'].astype(str).str.strip()
+        for _, r in intra_df.iterrows():
+            if pd.isna(r['_date']) or not r['_date']:
+                continue
+            intra_lookup[(r['_hn'], r['_date'])] = r.to_dict()
+
+    conn = sqlite3.connect(DB_PATH)
+    existing_cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(cases)").fetchall()}
+    if 'requested_date' not in existing_cols:
+        conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
+        conn.commit()
+
+    inserted = skipped_no_hn = skipped_no_date = skipped_duplicate = 0
+    enriched_sched = enriched_intra = 0
+    samples = []
+    cost_keys = set()
+
+    def _str_or_none(v):
+        if v is None or pd.isna(v):
+            return None
+        s = str(v).strip()
+        if not s or s.lower() in ('nan', 'none', '-'):
+            return None
+        return s
+
+    for _, c in cost_df.iterrows():
+        # HN
+        hn_raw = c.get('HN')
+        if pd.isna(hn_raw):
+            skipped_no_hn += 1
+            continue
+        try:
+            hn = str(int(float(hn_raw))).strip()
+        except (ValueError, TypeError):
+            skipped_no_hn += 1
+            continue
+
+        # Date
+        op_iso = _parse_thai_date(c.get('Date'))
+        if not op_iso:
+            skipped_no_date += 1
+            continue
+        cost_keys.add((hn, op_iso))
+
+        # Skip duplicate
+        if conn.execute("SELECT case_id FROM cases WHERE op_date=? AND hn=?",
+                        (op_iso, hn)).fetchone():
+            skipped_duplicate += 1
+            continue
+
+        s_row = sched_lookup.get((hn, op_iso))
+        i_row = intra_lookup.get((hn, op_iso))
+        if s_row: enriched_sched += 1
+        if i_row: enriched_intra += 1
+
+        # Field consolidation (priority: intraop > cost > schedule)
+        name = (_str_or_none(c.get('ชื่อ-สกุลผู้ป่วย'))
+                or (_str_or_none(s_row.get('dspname')) if s_row else None))
+        proc = (_str_or_none(c.get('Operation'))
+                or (_str_or_none(s_row.get('icd9cm_name')) if s_row else None)
+                or '-')
+        surgeon = (
+            (_str_or_none(i_row.get('dctnm')) if i_row else None)
+            or _str_or_none(c.get('แพทย์ทำผ่าตัด'))
+            or (_str_or_none(s_row.get('surgstfnm')) if s_row else None)
+        )
+
+        # case_category from sched reqdate (if avail)
+        req_iso = None
+        if s_row:
+            req_iso = _norm_date(s_row.get('reqdate'))
+        case_cat = _classify_case_category(req_iso, op_iso)
+
+        # AN + patient_type
+        an_val = None
+        if s_row:
+            an_raw = s_row.get('an')
+            if pd.notna(an_raw):
+                try:
+                    an_val = (str(int(float(an_raw)))
+                              if '.' in str(an_raw) else str(an_raw).strip())
+                except (ValueError, TypeError):
+                    pass
+        pt_type = 'IPD' if an_val else 'OPD'
+
+        diag = _str_or_none(s_row.get('icd10_name')) if s_row else None
+        division = _str_or_none(s_row.get('division')) if s_row else None
+
+        # Timestamps (intraop precise > cost HH:MM)
+        arrived_at = (_make_timestamp(op_iso, i_row.get('arrivtime'))
+                      if i_row else None) \
+                     or _parse_time_str(c.get('เวลารับ'), op_iso)
+        in_or_at = (_make_timestamp(op_iso, i_row.get('roomtimein'))
+                    if i_row else None) \
+                   or _parse_time_str(c.get('Op.start'), op_iso)
+        op_end_at = (_make_timestamp(op_iso, i_row.get('roomtimeout'))
+                     if i_row else None) \
+                    or _parse_time_str(c.get('Op.end'), op_iso)
+        discharged_at = _parse_time_str(c.get('D/C'), op_iso) or op_end_at
+
+        # Duration
+        actual_min = None
+        if i_row:
+            actual_min = _duration_to_min(i_row.get('opusetime'))
+        if actual_min is None:
+            d = c.get('Duration (min)')
+            if pd.notna(d):
+                try:
+                    actual_min = int(float(d))
+                except (ValueError, TypeError):
+                    pass
+
+        # Nurses
+        scrub = (_str_or_none(i_row.get('nursurgnm')) if i_row else None) \
+                or _str_or_none(c.get('Scrub nurse'))
+        circ = (_str_or_none(i_row.get('nurcircunm')) if i_row else None) \
+               or _str_or_none(c.get('Circulating nurse'))
+
+        treat = _safe_int(c.get('ราคาผ่าตัด'))
+        patho = _safe_int(c.get('ราคาชิ้นเนื้อ'))
+
+        room_no = 32
+        if i_row and pd.notna(i_row.get('orroom')):
+            try: room_no = int(i_row['orroom'])
+            except (ValueError, TypeError): pass
+
+        if not dry_run:
+            conn.execute("""
+                INSERT INTO cases (
+                    op_date, hn, name, an, diagnosis, procedure_name,
+                    surgeon_name, division_code, case_category, patient_type,
+                    status, arrived_at, in_or_at, op_end_at, discharged_at,
+                    actual_duration_min, scrub_nurse, circ_nurse,
+                    treatment_cost, patho_cost, room_no, requested_date
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,'discharged',
+                          ?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                op_iso, hn, name, an_val, diag, proc,
+                surgeon, division, case_cat, pt_type,
+                arrived_at, in_or_at, op_end_at, discharged_at,
+                actual_min, scrub, circ,
+                treat, patho, room_no, req_iso,
+            ))
+            inserted += 1
+
+        samples.append({
+            'HN': hn, 'Date': op_iso,
+            'ชื่อ': (name or '-')[:25],
+            'หัตถการ': proc[:25],
+            'cat': case_cat,
+            'sched': '✓' if s_row else '-',
+            'intra': '✓' if i_row else '-',
+            'ค่าผ่า': treat,
+        })
+
+    # Cases in sched/intraop but NOT in cost (likely cancelled/not-performed)
+    sched_only = []
+    if sched_lookup:
+        for k, sr in sched_lookup.items():
+            if k not in cost_keys:
+                sched_only.append({
+                    'HN': k[0], 'Date': k[1],
+                    'ชื่อ': str(sr.get('dspname', '') or '-')[:25],
+                    'หัตถการ (sched)': str(sr.get('icd9cm_name', '') or '-')[:30],
+                })
+
+    if not dry_run:
+        conn.commit()
+        try:
+            from minor_or_db import _set_app_setting
+            _set_app_setting('skip_auto_import', '0')
+        except Exception:
+            pass
+    conn.close()
+
+    return {
+        'inserted': inserted,
+        'skipped_no_hn': skipped_no_hn,
+        'skipped_no_date': skipped_no_date,
+        'skipped_duplicate': skipped_duplicate,
+        'enriched_sched': enriched_sched,
+        'enriched_intra': enriched_intra,
+        'sched_only_not_in_cost': len(sched_only),
+        'sched_only_samples': sched_only[:30],
+        'samples': samples,
+    }
 
 
 def import_historical_with_costs(sched_path: str, intra_path: str,
