@@ -2,6 +2,7 @@
 Minor OR Admin Dashboard — หน้าบริหารจัดการสำหรับหัวหน้า/ผู้บริหาร
 ดูอย่างเดียว ไม่ต้องกดอะไร — เปิดมาเห็นภาพรวมทันที
 """
+import time
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -130,6 +131,226 @@ _ADMIN_CSS = """
 # ============================================================================
 # COMPONENTS
 # ============================================================================
+
+# ============================================================================
+# Demo Mode — จำลอง 1 วันของห้องผ่าตัด ภายใน 5 นาที (real time)
+# ใช้ session_state — ไม่บันทึก DB
+# ============================================================================
+
+# Timeline (นาทีจาก 8:00 AM): arr, in_or, op_end, dc, room, name, hn, dx, proc, surgeon, ai_min, override
+_DEMO_CASES = [
+    (15, 30, 60, 75, 1, 'นาย สมชาย ทดสอบ', 'DEMO001',
+        'Lipoma at neck', 'Excision', 'นพ.เอ ทดสอบ', 30, None),
+    (30, 45, 105, 120, 3, 'น.ส. มาลี ทดลองใช้', 'DEMO002',
+        'Rt. Renal stone', 'ESWL', 'นพ.บี ทดสอบ', 60, None),
+    (90, 120, 145, 160, 1, 'นาย สมศักดิ์ ทดสอบ', 'DEMO003',
+        'Abscess Lt. arm', 'I+D', 'นพ.ซี ทดสอบ', 25, None),
+    (150, None, None, None, 4, 'นาง พรรณี ทดลองใช้', 'DEMO004',
+        'Mass at chest', 'Excision', 'นพ.เอ ทดสอบ', 30, 'cancelled'),
+    (180, 210, 230, 240, 4, 'นาย วิชัย ทดสอบ', 'DEMO005',
+        'ESRD', 'Off PERM', 'นพ.บี ทดสอบ', 20, None),
+    (300, 330, 365, 380, 3, 'น.ส. กัญญา ทดลองใช้', 'DEMO006',
+        'Melasma', 'Q-Switch', 'นพ.ดี ทดสอบ', 35, None),
+    (480, 510, 560, 580, 1, 'นาย ปรีชา ทดสอบ', 'DEMO007',
+        'Aging Face', 'Morpheus', 'นพ.ดี ทดสอบ', 50, None),  # นอกเวลา
+]
+_DEMO_END_MIN = 600  # 8:00 + 10hr = 18:00
+
+
+def _demo_to_real_ts(sim_min, current_sim_min):
+    """Map demo sim minute → real timestamp string ที่ render card คำนวณ
+    elapsed ได้ถูกต้อง (now - timestamp = elapsed sim minutes)."""
+    if sim_min is None or current_sim_min < sim_min:
+        return None
+    delta = current_sim_min - sim_min
+    real_dt = _now_bkk() - timedelta(minutes=delta)
+    return real_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _get_demo_rooms(current_sim_min):
+    """Return rooms list (เหมือน get_room_status) สำหรับ demo mode."""
+    rooms_data = {1: [], 3: [], 4: [], 5: []}
+
+    for c in _DEMO_CASES:
+        (arr_m, ior_m, end_m, dc_m, room, name, hn, dx, proc,
+         surg, ai_min, override) = c
+
+        # Determine status at current sim_min
+        if override == 'cancelled':
+            status = 'cancelled' if current_sim_min >= arr_m else 'scheduled'
+        elif current_sim_min < arr_m:
+            status = 'scheduled'
+        elif ior_m and current_sim_min < ior_m:
+            status = 'arrived'
+        elif end_m and current_sim_min < end_m:
+            status = 'in_or'
+        elif dc_m and current_sim_min < dc_m:
+            status = 'post_op'
+        elif dc_m and current_sim_min >= dc_m:
+            status = 'discharged'
+        else:
+            status = 'arrived'
+
+        case = {
+            'case_id': hn,
+            'name': name,
+            'hn': hn,
+            'diagnosis': dx,
+            'procedure_name': proc,
+            'surgeon_name': surg,
+            'status': status,
+            'arrived_at': _demo_to_real_ts(arr_m, current_sim_min),
+            'in_or_at': _demo_to_real_ts(ior_m, current_sim_min),
+            'op_end_at': _demo_to_real_ts(end_m, current_sim_min),
+            'discharged_at': _demo_to_real_ts(dc_m, current_sim_min),
+            'ai_predicted_min': ai_min,
+            'actual_duration_min': (
+                (end_m - ior_m) if (end_m and ior_m
+                                    and current_sim_min >= end_m) else None),
+            '_ai_n_cases': 5,                    # mock
+            '_ai_confidence': 'สูง',              # mock
+            '_ai_source': 'local_history',
+        }
+        rooms_data[room].append(case)
+
+    result = []
+    for rm in [1, 3, 4, 5]:
+        cases_in_rm = rooms_data[rm]
+        active = [c for c in cases_in_rm if c['status'] == 'in_or']
+        done = [c for c in cases_in_rm
+                if c['status'] in ('post_op', 'discharged')]
+        waiting = [c for c in cases_in_rm
+                   if c['status'] in ('scheduled', 'arrived')]
+        result.append({
+            'room_no': rm,
+            'total': len([c for c in cases_in_rm
+                          if c['status'] != 'cancelled']),
+            'done': len(done),
+            'waiting': len(waiting),
+            'active_case': active[0] if active else None,
+            'cases': cases_in_rm,
+        })
+    return result
+
+
+def _get_demo_kpi(current_sim_min):
+    """Build KPI dict for demo mode."""
+    total = done = cancelled = 0
+    for c in _DEMO_CASES:
+        arr_m, ior_m, end_m, dc_m, room, *_, override = c
+        if override == 'cancelled':
+            if current_sim_min >= arr_m:
+                cancelled += 1
+                total += 1
+        else:
+            if current_sim_min >= arr_m:
+                total += 1
+                if dc_m and current_sim_min >= dc_m:
+                    done += 1
+    return {
+        'total': total, 'done': done, 'cancelled': cancelled,
+        'in_or': sum(1 for c in _DEMO_CASES
+                     if c[11] != 'cancelled'
+                     and c[1] and current_sim_min >= c[1]
+                     and c[2] and current_sim_min < c[2]),
+        'pending': sum(1 for c in _DEMO_CASES
+                       if c[11] != 'cancelled' and current_sim_min < c[0]),
+    }
+
+
+def _render_demo_controls():
+    """แสดง toggle + controls ของ Demo Mode. Return current sim_min หรือ None."""
+    state = st.session_state.setdefault('demo', {
+        'active': False, 'playing': True, 'speed': 1,
+        'real_started': time.time(), 'paused_at_sim': 0.0,
+    })
+
+    col_t, col_info = st.columns([1, 3])
+    with col_t:
+        new_active = st.toggle(
+            '🎬 Demo Mode', value=state['active'], key='demo_toggle',
+            help='จำลองการทำงาน 1 วัน ภายใน 5 นาที — ไม่บันทึก DB จริง')
+    if new_active != state['active']:
+        state['active'] = new_active
+        if new_active:
+            state['real_started'] = time.time()
+            state['paused_at_sim'] = 0.0
+            state['playing'] = True
+        st.rerun()
+
+    if not state['active']:
+        return None
+
+    # Compute current sim_min
+    if state['playing']:
+        real_elapsed = time.time() - state['real_started']
+        # 5 นาทีจริง = 600 นาทีจำลอง → 1 วินาทีจริง = 2 นาทีจำลอง
+        sim_min = state['paused_at_sim'] + (real_elapsed * 2.0 * state['speed'])
+    else:
+        sim_min = state['paused_at_sim']
+
+    # Cap at end of day
+    sim_min = min(sim_min, _DEMO_END_MIN)
+    if sim_min >= _DEMO_END_MIN and state['playing']:
+        state['playing'] = False
+        state['paused_at_sim'] = _DEMO_END_MIN
+
+    # Display info
+    sim_hour = 8 + sim_min / 60
+    sim_time_str = f'{int(sim_hour):02d}:{int((sim_hour % 1) * 60):02d}'
+    pct = sim_min / _DEMO_END_MIN * 100
+
+    with col_info:
+        st.markdown(f"""
+        <div style="background:#fff3e0;border-radius:8px;padding:8px 12px;
+                    border-left:4px solid #ef6c00;margin-top:6px;">
+          <span style="font-size:13px;color:#e65100;font-weight:700;">
+            🕐 เวลาจำลอง: <b>{sim_time_str}</b></span>
+          <span style="font-size:11px;color:#bf360c;margin-left:12px;">
+            ({sim_min:.0f}/{_DEMO_END_MIN} นาที · {pct:.0f}%)
+            · 🔇 ไม่บันทึก DB จริง</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Controls row
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+    with c1:
+        play_label = '⏸ หยุด' if state['playing'] else '▶ เล่น'
+        if st.button(play_label, use_container_width=True, key='demo_play'):
+            if state['playing']:
+                # Pause: save current sim_min
+                real_elapsed = time.time() - state['real_started']
+                state['paused_at_sim'] += (real_elapsed * 2.0 * state['speed'])
+                state['playing'] = False
+            else:
+                state['real_started'] = time.time()
+                state['playing'] = True
+            st.rerun()
+    with c2:
+        if st.button('⏹ รีเซ็ต', use_container_width=True, key='demo_reset'):
+            state['real_started'] = time.time()
+            state['paused_at_sim'] = 0.0
+            state['playing'] = True
+            st.rerun()
+    with c3:
+        new_speed = st.selectbox(
+            'ความเร็ว', [1, 2, 5],
+            index=[1, 2, 5].index(state['speed']),
+            key='demo_speed_select', label_visibility='collapsed')
+        if new_speed != state['speed']:
+            real_elapsed = time.time() - state['real_started']
+            state['paused_at_sim'] += (real_elapsed * 2.0 * state['speed'])
+            state['real_started'] = time.time()
+            state['speed'] = new_speed
+            st.rerun()
+    with c4:
+        st.caption(
+            "💡 เคสจะค่อย ๆ ผ่าน flow: รอ → เข้าห้อง → กำลังผ่า → เสร็จ "
+            "(7 เคส รวม 1 cancel + 1 นอกเวลา)"
+        )
+
+    return sim_min
+
 
 def _render_one_room_card(rm):
     """Render single room card (used in 2x2 grid)."""
@@ -1185,14 +1406,19 @@ def page_admin():
     with tab_today:
         op_date = _now_bkk().strftime('%Y-%m-%d')
 
-        # ── Auto-refresh ทุก 60 วินาที (สำหรับ room cards real-time) ──
+        # ── Demo Mode toggle + controls (ด้านบนสุด) ──
+        sim_min = _render_demo_controls()
+        demo_active = sim_min is not None
+
+        # ── Auto-refresh: 3 วิ ใน demo mode, 60 วิใน normal ──
         try:
             from streamlit_autorefresh import st_autorefresh
-            st_autorefresh(interval=60_000, key='today_refresh')
+            st_autorefresh(
+                interval=3_000 if demo_active else 60_000,
+                key='today_refresh' if not demo_active else 'demo_refresh')
         except ImportError:
-            # Fallback: HTML meta-refresh (ทำให้ทั้งหน้า reload)
             st.markdown(
-                '<meta http-equiv="refresh" content="60">',
+                f'<meta http-equiv="refresh" content="{3 if demo_active else 60}">',
                 unsafe_allow_html=True,
             )
 
@@ -1205,13 +1431,17 @@ def page_admin():
             '<span style="font-size:16px;font-weight:700;color:#2e7d32;">'
             '🏥 เคสในเวลา</span>'
             '<span style="font-size:12px;color:#388e3c;margin-left:8px;">'
-            'Full OR Flow + AI Prediction · auto-refresh ทุก 1 นาที</span></div>',
+            'Full OR Flow + AI Prediction · auto-refresh ทุก '
+            f'{"3 วินาที (demo)" if demo_active else "1 นาที"}</span></div>',
             unsafe_allow_html=True,
         )
 
         st.markdown('<div class="section-title">🏥 สถานะห้องผ่าตัด</div>',
                     unsafe_allow_html=True)
-        rooms = get_room_status(op_date)
+        if demo_active:
+            rooms = _get_demo_rooms(sim_min)
+        else:
+            rooms = get_room_status(op_date)
         _render_room_cards(rooms)
 
 
