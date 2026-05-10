@@ -393,58 +393,65 @@ def _render_one_room_card(rm):
             conf_text = ''
 
         diag = (active.get('diagnosis') or '').strip()
-        diag_html = (f'<div style="font-size:12px;color:#607d8b;'
-                     f'font-style:italic;margin:2px 0;'
-                     f'overflow:hidden;text-overflow:ellipsis;'
-                     f'white-space:nowrap;" '
-                     f'title="{diag}">🩺 {diag}</div>'
-                     if diag and diag.lower() not in ('-', 'nan', 'none')
-                     else '')
+        diag_safe = diag.replace('"', '&quot;')
+        diag_html = ''
+        if diag and diag.lower() not in ('-', 'nan', 'none'):
+            diag_html = (
+                f'<div style="font-size:12px;color:#607d8b;'
+                f'font-style:italic;margin:2px 0;overflow:hidden;'
+                f'text-overflow:ellipsis;white-space:nowrap;" '
+                f'title="{diag_safe}">🩺 {diag}</div>'
+            )
 
         ai_pred_html = (f'🤖 AI {ai_min} น. | ใช้ไป <b>{elapsed_min}</b> น.'
                         if ai_min else f'⏱ ใช้ไป {elapsed_min} นาที')
 
+        # IMPORTANT: HTML must be on ONE LINE (no leading whitespace)
+        # otherwise Streamlit's markdown parser treats it as code block
         bar_html = ''
         if ai_min:
-            bar_html = f'''
-            <div style="background:#e0e0e0;border-radius:8px;height:18px;
-                        margin-top:6px;overflow:hidden;position:relative;">
-              <div style="background:{bar_color};height:100%;
-                          width:{bar_width}%;
-                          transition:width 1s ease;
-                          border-radius:8px;"></div>
-              <div style="position:absolute;top:0;left:0;right:0;bottom:0;
-                          display:flex;align-items:center;
-                          justify-content:center;font-size:11px;
-                          font-weight:700;color:#333;">{pct}%</div>
-            </div>'''
+            bar_html = (
+                f'<div style="background:#e0e0e0;border-radius:8px;'
+                f'height:18px;margin-top:6px;overflow:hidden;'
+                f'position:relative;">'
+                f'<div style="background:{bar_color};height:100%;'
+                f'width:{bar_width}%;transition:width 1s ease;'
+                f'border-radius:8px;"></div>'
+                f'<div style="position:absolute;top:0;left:0;right:0;'
+                f'bottom:0;display:flex;align-items:center;'
+                f'justify-content:center;font-size:11px;font-weight:700;'
+                f'color:#333;">{pct}%</div>'
+                f'</div>'
+            )
 
-        st.markdown(f"""
-        <div class="room-card room-busy" style="text-align:left;">
-            <div style="font-size:14px;font-weight:700;color:#1565c0;
-                        margin-bottom:4px;">🏥 ห้อง {rm['room_no']}
-                <span style="float:right;font-size:11px;color:#1976d2;">
-                  🔵 กำลังผ่าตัด</span></div>
-            <div style="font-size:13px;color:#333;font-weight:600;
-                        white-space:nowrap;overflow:hidden;
-                        text-overflow:ellipsis;"
-                 title="{active.get('name','')}">
-              👤 {active.get('name') or '-'}</div>
-            {diag_html}
-            <div style="font-size:13px;color:#1565c0;margin:2px 0;
-                        white-space:nowrap;overflow:hidden;
-                        text-overflow:ellipsis;"
-                 title="{active.get('procedure_name','')}">
-              ⚕ <b>{active.get('procedure_name') or '-'}</b></div>
-            <div style="font-size:11px;color:#666;">
-              👨‍⚕️ {active.get('surgeon_name') or '-'}</div>
-            <div style="font-size:12px;color:#444;margin-top:6px;">
-              {ai_pred_html}</div>
-            {bar_html}
-            <div style="font-size:11px;color:#666;margin-top:4px;">
-              {conf_text}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Build full HTML as single concatenated string — no leading whitespace
+        # (Streamlit markdown treats indented lines as code blocks)
+        nm_safe = (active.get('name') or '-').replace('"', '&quot;')
+        proc_safe = (active.get('procedure_name') or '-').replace('"', '&quot;')
+        card_html = (
+            f'<div class="room-card room-busy" style="text-align:left;">'
+            f'<div style="font-size:14px;font-weight:700;color:#1565c0;'
+            f'margin-bottom:4px;">🏥 ห้อง {rm["room_no"]}'
+            f'<span style="float:right;font-size:11px;color:#1976d2;">'
+            f'🔵 กำลังผ่าตัด</span></div>'
+            f'<div style="font-size:13px;color:#333;font-weight:600;'
+            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" '
+            f'title="{nm_safe}">👤 {active.get("name") or "-"}</div>'
+            f'{diag_html}'
+            f'<div style="font-size:13px;color:#1565c0;margin:2px 0;'
+            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" '
+            f'title="{proc_safe}">'
+            f'⚕ <b>{active.get("procedure_name") or "-"}</b></div>'
+            f'<div style="font-size:11px;color:#666;">'
+            f'👨‍⚕️ {active.get("surgeon_name") or "-"}</div>'
+            f'<div style="font-size:12px;color:#444;margin-top:6px;">'
+            f'{ai_pred_html}</div>'
+            f'{bar_html}'
+            f'<div style="font-size:11px;color:#666;margin-top:4px;">'
+            f'{conf_text}</div>'
+            f'</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 
     elif rm['done'] > 0 and rm['waiting'] == 0:
         st.markdown(f"""
