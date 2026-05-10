@@ -1412,7 +1412,13 @@ def get_audit_trail(case_id: int = None) -> pd.DataFrame:
 # ============================================================================
 
 def get_room_status(op_date: str = None) -> list:
-    """สถานะห้องผ่าตัดแต่ละห้อง — ใช้ใน Admin Dashboard."""
+    """สถานะห้องผ่าตัดแต่ละห้อง — ใช้ใน Admin Dashboard.
+
+    สำหรับ active case (กำลังผ่า) จะเพิ่ม:
+      - _ai_n_cases:   จำนวนเคสที่ใช้ใน local history (จาก predict_from_local_history)
+      - _ai_confidence: ระดับความมั่นใจของ AI (สูงมาก/สูง/ปานกลาง/ต่ำ)
+      - _ai_source:    'local_history' หรือ 'ml_model' หรือ 'fallback'
+    """
     if not op_date:
         op_date = _now_dt().strftime('%Y-%m-%d')
     conn = get_conn()
@@ -1420,8 +1426,9 @@ def get_room_status(op_date: str = None) -> list:
     result = []
     for rm in rooms:
         cases = pd.read_sql_query("""
-            SELECT case_id, name, hn, procedure_name, surgeon_name, status,
-                   in_or_at, op_end_at, ai_predicted_min, actual_duration_min
+            SELECT case_id, name, hn, diagnosis, procedure_name, surgeon_name,
+                   status, in_or_at, op_end_at, ai_predicted_min,
+                   actual_duration_min
             FROM cases
             WHERE op_date=? AND room_no=? AND status != 'cancelled'
             ORDER BY case_id
@@ -1429,12 +1436,35 @@ def get_room_status(op_date: str = None) -> list:
         active = cases[cases['status'] == 'in_or']
         done = cases[cases['status'].isin(['post_op', 'discharged'])]
         waiting = cases[cases['status'].isin(['scheduled', 'arrived'])]
+
+        active_case = active.iloc[0].to_dict() if len(active) > 0 else None
+        # Enrich active case with AI confidence + n_cases used
+        if active_case:
+            try:
+                pred = predict_from_local_history(
+                    active_case.get('procedure_name'),
+                    active_case.get('surgeon_name'),
+                )
+                if pred:
+                    active_case['_ai_n_cases'] = pred['n_cases']
+                    active_case['_ai_confidence'] = pred['confidence']
+                    active_case['_ai_source'] = 'local_history'
+                else:
+                    # No local history → using ML model
+                    active_case['_ai_n_cases'] = 0
+                    active_case['_ai_confidence'] = 'ต่ำ'
+                    active_case['_ai_source'] = 'ml_model'
+            except Exception:
+                active_case['_ai_n_cases'] = 0
+                active_case['_ai_confidence'] = '-'
+                active_case['_ai_source'] = '-'
+
         result.append({
             'room_no': rm,
             'total': len(cases),
             'done': len(done),
             'waiting': len(waiting),
-            'active_case': active.iloc[0].to_dict() if len(active) > 0 else None,
+            'active_case': active_case,
             'cases': cases,
         })
     conn.close()

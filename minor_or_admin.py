@@ -131,63 +131,148 @@ _ADMIN_CSS = """
 # COMPONENTS
 # ============================================================================
 
+def _render_one_room_card(rm):
+    """Render single room card (used in 2x2 grid)."""
+    active = rm['active_case']
+
+    if active:
+        # กำลังผ่าตัด — แสดง diagnosis + AI bar + confidence
+        elapsed_min = 0
+        if active.get('in_or_at'):
+            try:
+                start = datetime.strptime(active['in_or_at'],
+                                          '%Y-%m-%d %H:%M:%S')
+                elapsed_min = int(
+                    (_now_bkk() - start).total_seconds() / 60)
+            except (ValueError, TypeError):
+                pass
+
+        ai_min = active.get('ai_predicted_min') or 0
+        pct = int((elapsed_min / ai_min) * 100) if ai_min else 0
+        # cap bar fill at 100% for display, but show actual % in label
+        bar_width = min(pct, 100)
+
+        # Bar color shifts subtly when over 100%
+        bar_color = '#26a69a' if pct <= 100 else '#ef5350'
+
+        n_cases = active.get('_ai_n_cases', 0)
+        confidence = active.get('_ai_confidence', '-')
+        source = active.get('_ai_source', '')
+
+        # Confidence emoji
+        conf_emoji = {'สูงมาก': '🟢', 'สูง': '🟢', 'ปานกลาง': '🟡',
+                      'ต่ำ': '🔴'}.get(confidence, '⚪')
+        if source == 'local_history' and n_cases:
+            conf_text = (f"{conf_emoji} AI มั่นใจ <b>{confidence}</b> "
+                         f"(จาก {n_cases} เคสคล้ายกัน)")
+        elif source == 'ml_model':
+            conf_text = (f"{conf_emoji} AI มั่นใจ <b>{confidence}</b> "
+                         "(ML model — ไม่มีประวัติเคสคล้าย)")
+        else:
+            conf_text = ''
+
+        diag = (active.get('diagnosis') or '').strip()
+        diag_html = (f'<div style="font-size:12px;color:#607d8b;'
+                     f'font-style:italic;margin:2px 0;'
+                     f'overflow:hidden;text-overflow:ellipsis;'
+                     f'white-space:nowrap;" '
+                     f'title="{diag}">🩺 {diag}</div>'
+                     if diag and diag.lower() not in ('-', 'nan', 'none')
+                     else '')
+
+        ai_pred_html = (f'🤖 AI {ai_min} น. | ใช้ไป <b>{elapsed_min}</b> น.'
+                        if ai_min else f'⏱ ใช้ไป {elapsed_min} นาที')
+
+        bar_html = ''
+        if ai_min:
+            bar_html = f'''
+            <div style="background:#e0e0e0;border-radius:8px;height:18px;
+                        margin-top:6px;overflow:hidden;position:relative;">
+              <div style="background:{bar_color};height:100%;
+                          width:{bar_width}%;
+                          transition:width 1s ease;
+                          border-radius:8px;"></div>
+              <div style="position:absolute;top:0;left:0;right:0;bottom:0;
+                          display:flex;align-items:center;
+                          justify-content:center;font-size:11px;
+                          font-weight:700;color:#333;">{pct}%</div>
+            </div>'''
+
+        st.markdown(f"""
+        <div class="room-card room-busy" style="text-align:left;">
+            <div style="font-size:14px;font-weight:700;color:#1565c0;
+                        margin-bottom:4px;">🏥 ห้อง {rm['room_no']}
+                <span style="float:right;font-size:11px;color:#1976d2;">
+                  🔵 กำลังผ่าตัด</span></div>
+            <div style="font-size:13px;color:#333;font-weight:600;
+                        white-space:nowrap;overflow:hidden;
+                        text-overflow:ellipsis;"
+                 title="{active.get('name','')}">
+              👤 {active.get('name') or '-'}</div>
+            {diag_html}
+            <div style="font-size:13px;color:#1565c0;margin:2px 0;
+                        white-space:nowrap;overflow:hidden;
+                        text-overflow:ellipsis;"
+                 title="{active.get('procedure_name','')}">
+              ⚕ <b>{active.get('procedure_name') or '-'}</b></div>
+            <div style="font-size:11px;color:#666;">
+              👨‍⚕️ {active.get('surgeon_name') or '-'}</div>
+            <div style="font-size:12px;color:#444;margin-top:6px;">
+              {ai_pred_html}</div>
+            {bar_html}
+            <div style="font-size:11px;color:#666;margin-top:4px;">
+              {conf_text}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    elif rm['done'] > 0 and rm['waiting'] == 0:
+        st.markdown(f"""
+        <div class="room-card room-done" style="text-align:center;">
+            <div style="font-size:14px;font-weight:700;color:#2e7d32;">
+              🏥 ห้อง {rm['room_no']}</div>
+            <div style="font-size:11px;color:#388e3c;margin:4px 0;">
+              ✅ เสร็จแล้ว</div>
+            <div style="font-size:32px;font-weight:700;color:#2e7d32;">
+              {rm['done']}</div>
+            <div style="font-size:12px;color:#666;">เคสเสร็จวันนี้</div>
+        </div>
+        """, unsafe_allow_html=True)
+    elif rm['total'] > 0:
+        st.markdown(f"""
+        <div class="room-card room-free" style="text-align:center;">
+            <div style="font-size:14px;font-weight:700;color:#616161;">
+              🏥 ห้อง {rm['room_no']}</div>
+            <div style="font-size:11px;color:#f57f17;margin:4px 0;">
+              ⏳ รอเข้าห้อง</div>
+            <div style="font-size:32px;font-weight:700;color:#f57f17;">
+              {rm['waiting']}</div>
+            <div style="font-size:12px;color:#666;">
+              เคสรอ / {rm['total']} ทั้งหมด</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="room-card room-free" style="text-align:center;">
+            <div style="font-size:14px;font-weight:700;color:#9e9e9e;">
+              🏥 ห้อง {rm['room_no']}</div>
+            <div style="font-size:11px;color:#bdbdbd;margin:4px 0;">—</div>
+            <div style="font-size:24px;font-weight:700;color:#bdbdbd;">
+              🌙 ห้องว่าง</div>
+            <div style="font-size:12px;color:#ccc;">พร้อมรับเคสถัดไป</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
 def _render_room_cards(rooms):
-    """แสดงสถานะห้องผ่าตัดเป็น cards."""
-    cols = st.columns(len(rooms))
-    for i, rm in enumerate(rooms):
-        with cols[i]:
-            active = rm['active_case']
-            if active:
-                # กำลังผ่าตัดอยู่
-                elapsed = ''
-                if active.get('in_or_at'):
-                    try:
-                        start = datetime.strptime(active['in_or_at'], '%Y-%m-%d %H:%M:%S')
-                        mins = int((_now_bkk() - start).total_seconds() / 60)
-                        elapsed = f'<div style="font-size:24px;font-weight:700;color:#1565c0;">{mins} นาที</div>'
-                    except:
-                        pass
-                pred_txt = f"ทำนาย {active['ai_predicted_min']} นาที" if active.get('ai_predicted_min') else ""
-                st.markdown(f"""
-                <div class="room-card room-busy">
-                    <div style="font-size:14px;font-weight:700;color:#1565c0;">ห้อง {rm['room_no']}</div>
-                    <div style="font-size:11px;color:#1976d2;margin:2px 0;">🔵 กำลังผ่าตัด</div>
-                    {elapsed}
-                    <div style="font-size:12px;margin-top:4px;"><b>{active['procedure_name'] or '-'}</b></div>
-                    <div style="font-size:11px;color:#666;">{active['name'] or '-'}</div>
-                    <div style="font-size:11px;color:#999;">{pred_txt}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            elif rm['done'] > 0 and rm['waiting'] == 0:
-                # เสร็จหมดแล้ว
-                st.markdown(f"""
-                <div class="room-card room-done">
-                    <div style="font-size:14px;font-weight:700;color:#2e7d32;">ห้อง {rm['room_no']}</div>
-                    <div style="font-size:11px;color:#388e3c;margin:2px 0;">✅ เสร็จแล้ว</div>
-                    <div style="font-size:28px;font-weight:700;color:#2e7d32;">{rm['done']}</div>
-                    <div style="font-size:12px;color:#666;">เคสเสร็จ</div>
-                </div>
-                """, unsafe_allow_html=True)
-            elif rm['total'] > 0:
-                # มีเคสแต่ยังไม่เข้าห้อง
-                st.markdown(f"""
-                <div class="room-card room-free">
-                    <div style="font-size:14px;font-weight:700;color:#616161;">ห้อง {rm['room_no']}</div>
-                    <div style="font-size:11px;color:#f57f17;margin:2px 0;">⏳ รอเข้าห้อง</div>
-                    <div style="font-size:28px;font-weight:700;color:#f57f17;">{rm['waiting']}</div>
-                    <div style="font-size:12px;color:#666;">เคสรอ / {rm['total']} ทั้งหมด</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                # ไม่มีเคส
-                st.markdown(f"""
-                <div class="room-card room-free">
-                    <div style="font-size:14px;font-weight:700;color:#9e9e9e;">ห้อง {rm['room_no']}</div>
-                    <div style="font-size:11px;color:#bdbdbd;margin:2px 0;">—</div>
-                    <div style="font-size:28px;font-weight:700;color:#bdbdbd;">ว่าง</div>
-                    <div style="font-size:12px;color:#ccc;">ไม่มีเคส</div>
-                </div>
-                """, unsafe_allow_html=True)
+    """2x2 grid layout (2 cards per row)"""
+    n = len(rooms)
+    per_row = 2
+    for row_start in range(0, n, per_row):
+        row_rooms = rooms[row_start:row_start + per_row]
+        cols = st.columns(per_row)
+        for i, rm in enumerate(row_rooms):
+            with cols[i]:
+                _render_one_room_card(rm)
 
 
 def _render_kpi(kpi):
@@ -1100,6 +1185,17 @@ def page_admin():
     with tab_today:
         op_date = _now_bkk().strftime('%Y-%m-%d')
 
+        # ── Auto-refresh ทุก 60 วินาที (สำหรับ room cards real-time) ──
+        try:
+            from streamlit_autorefresh import st_autorefresh
+            st_autorefresh(interval=60_000, key='today_refresh')
+        except ImportError:
+            # Fallback: HTML meta-refresh (ทำให้ทั้งหน้า reload)
+            st.markdown(
+                '<meta http-equiv="refresh" content="60">',
+                unsafe_allow_html=True,
+            )
+
         # =========================================================
         # Section: เคสในเวลา
         # =========================================================
@@ -1109,11 +1205,12 @@ def page_admin():
             '<span style="font-size:16px;font-weight:700;color:#2e7d32;">'
             '🏥 เคสในเวลา</span>'
             '<span style="font-size:12px;color:#388e3c;margin-left:8px;">'
-            'Full OR Flow + AI Prediction</span></div>',
+            'Full OR Flow + AI Prediction · auto-refresh ทุก 1 นาที</span></div>',
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div class="section-title">🏥 สถานะห้องผ่าตัด</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🏥 สถานะห้องผ่าตัด</div>',
+                    unsafe_allow_html=True)
         rooms = get_room_status(op_date)
         _render_room_cards(rooms)
 
