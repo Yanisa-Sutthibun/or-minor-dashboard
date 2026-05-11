@@ -234,27 +234,39 @@ def _get_demo_rooms(current_sim_min):
 
 
 def _get_demo_kpi(current_sim_min):
-    """Build KPI dict for demo mode."""
-    total = done = cancelled = 0
+    """Build KPI dict for demo mode (matches get_kpi schema)."""
+    total = done = cancelled = in_or = pending = 0
+    total_op_min = 0  # for utilization calc
     for c in _DEMO_CASES:
-        arr_m, ior_m, end_m, dc_m, room, *_, override = c
+        arr_m, ior_m, end_m, dc_m, room, *_rest, override = c
         if override == 'cancelled':
             if current_sim_min >= arr_m:
                 cancelled += 1
                 total += 1
-        else:
-            if current_sim_min >= arr_m:
-                total += 1
-                if dc_m and current_sim_min >= dc_m:
+            continue
+        if current_sim_min >= arr_m:
+            total += 1
+            # in_or right now?
+            if ior_m and current_sim_min >= ior_m:
+                if end_m and current_sim_min >= end_m:
                     done += 1
+                    total_op_min += (end_m - ior_m)
+                else:
+                    in_or += 1
+                    total_op_min += (current_sim_min - ior_m)
+            else:
+                pending += 1
+        # else: not yet arrived
+
+    # Utilization: total op minutes / (4 rooms × elapsed sim time)
+    elapsed = max(current_sim_min, 1)
+    utilization = round(total_op_min / (4 * elapsed) * 100, 0)
+
     return {
         'total': total, 'done': done, 'cancelled': cancelled,
-        'in_or': sum(1 for c in _DEMO_CASES
-                     if c[11] != 'cancelled'
-                     and c[1] and current_sim_min >= c[1]
-                     and c[2] and current_sim_min < c[2]),
-        'pending': sum(1 for c in _DEMO_CASES
-                       if c[11] != 'cancelled' and current_sim_min < c[0]),
+        'in_or': in_or, 'pending': pending,
+        'utilization': int(utilization),
+        'avg_turnover': 12,  # mock
     }
 
 
@@ -403,7 +415,8 @@ def _render_one_room_card(rm):
                 f'title="{diag_safe}">🩺 {diag}</div>'
             )
 
-        ai_pred_html = (f'🤖 AI {ai_min} น. | ใช้ไป <b>{elapsed_min}</b> น.'
+        ai_pred_html = (f'🤖 AI ทำนายเวลาใช้ห้อง {ai_min} น. | '
+                        f'ใช้ไป <b>{elapsed_min}</b> น.'
                         if ai_min else f'⏱ ใช้ไป {elapsed_min} นาที')
 
         # IMPORTANT: HTML must be on ONE LINE (no leading whitespace)
@@ -767,7 +780,7 @@ def _render_ai_research_tab():
                         'error': ':.0f', 'error_cat': False,
                         'procedure_name': False, 'surgeon_name': False},
             labels={'actual_duration_min': 'เวลาจริง (นาที)',
-                    'ai_predicted_min': 'AI ทำนาย (นาที)'},
+                    'ai_predicted_min': 'AI ทำนายเวลาใช้ห้อง (นาที)'},
         )
         max_v = float(max(df['actual_duration_min'].max(),
                           df['ai_predicted_min'].max()) * 1.1)
@@ -1447,24 +1460,29 @@ def page_admin():
                     unsafe_allow_html=True)
         if demo_active:
             rooms = _get_demo_rooms(sim_min)
+            kpi = _get_demo_kpi(sim_min)
         else:
             rooms = get_room_status(op_date)
+            kpi = get_kpi(op_date)
         _render_room_cards(rooms)
 
-
-        _thai_months = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+        _thai_months = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+                        'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
         _today_dt = _now_bkk()
-        _thai_date = f"{_today_dt.day} {_thai_months[_today_dt.month]} {_today_dt.year + 543}"
-        st.markdown(f'<div class="section-title">📈 ตัวเลขสำคัญ — {_thai_date}</div>', unsafe_allow_html=True)
-        kpi = get_kpi(op_date)
+        _thai_date = (f"{_today_dt.day} {_thai_months[_today_dt.month]} "
+                      f"{_today_dt.year + 543}")
+        title_label = ('🎬 ตัวเลขสำคัญ (Demo)' if demo_active
+                       else f'📈 ตัวเลขสำคัญ — {_thai_date}')
+        st.markdown(f'<div class="section-title">{title_label}</div>',
+                    unsafe_allow_html=True)
         _render_kpi(kpi)
 
-        if kpi['total'] > 0:
+        if kpi.get('total', 0) > 0:
             progress = kpi['done'] / kpi['total']
             st.markdown(f"""
             <div style="margin:12px 0 4px;">
                 <div style="display:flex;justify-content:space-between;font-size:13px;color:#333;font-weight:700;">
-                    <span>ความคืบหน้าวันนี้</span>
+                    <span>ความคืบหน้า{'จำลอง' if demo_active else 'วันนี้'}</span>
                     <span>{kpi['done']}/{kpi['total']} เคส ({progress:.0%})</span>
                 </div>
                 <div style="background:#e0e0e0;border-radius:6px;height:12px;margin-top:4px;">
@@ -1475,18 +1493,32 @@ def page_admin():
             </div>
             """, unsafe_allow_html=True)
 
-        st.markdown('<div class="section-title">⚠️ แจ้งเตือน</div>', unsafe_allow_html=True)
+        # ── Demo mode: ซ่อน sections ที่อิง real DB (alerts, workload, ฯลฯ) ──
+        if demo_active:
+            st.info(
+                "🎬 **โหมด Demo** — แสดงเฉพาะ Room cards + KPI\n\n"
+                "🔇 sections อื่น (แจ้งเตือน, ภาระงาน, รับเวร, ผู้ป่วยรอ) "
+                "ถูกซ่อนชั่วคราว เพื่อ focus ที่ flow หลัก\n\n"
+                "💡 ปิด Demo Mode เพื่อกลับไปดูข้อมูลจริงครบทุก section"
+            )
+            return
+
+        st.markdown('<div class="section-title">⚠️ แจ้งเตือน</div>',
+                    unsafe_allow_html=True)
         alerts = get_delay_alerts(op_date)
         _render_alerts(alerts)
 
-        st.markdown('<div class="section-title">👥 ภาระงาน</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">👥 ภาระงาน</div>',
+                    unsafe_allow_html=True)
         wl = get_workload(op_date)
         _render_workload(wl)
 
-        st.markdown('<div class="section-title">🔍 Progress รายบุคคล</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🔍 Progress รายบุคคล</div>',
+                    unsafe_allow_html=True)
         _render_nurse_progress(op_date)
 
-        with st.expander("🤖 AI Prediction Accuracy (สำหรับวิจัย)", expanded=False):
+        with st.expander("🤖 AI Prediction Accuracy (สำหรับวิจัย)",
+                         expanded=False):
             _render_ai_accuracy(op_date)
 
         # =========================================================

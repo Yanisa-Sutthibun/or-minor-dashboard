@@ -786,7 +786,7 @@ def _render_case(row):
 
 
 def _ai_badge(row):
-    """Return HTML badge showing AI predicted time."""
+    """Return HTML badge showing AI predicted time + progress bar (when in_or)."""
     ai = row.get('ai_predicted_min')
     if ai is None or (isinstance(ai, float) and (ai != ai)):  # NaN check
         return ''
@@ -796,7 +796,42 @@ def _ai_badge(row):
         return ''
     if ai <= 0:
         return ''
-    return f'<div class="ai-badge">🤖 AI ทำนาย: ~{ai} นาที</div>'
+
+    status = row.get('status', '')
+    in_or_at = row.get('in_or_at')
+
+    # When กำลังผ่า → แสดง progress bar
+    if status == 'in_or' and in_or_at:
+        try:
+            start = datetime.strptime(str(in_or_at), '%Y-%m-%d %H:%M:%S')
+            elapsed_min = max(0, int(
+                (_now_bkk() - start).total_seconds() / 60))
+            pct = int((elapsed_min / ai) * 100) if ai > 0 else 0
+            bar_width = min(pct, 100)
+            bar_color = '#26a69a' if pct <= 100 else '#ef5350'
+            # Build single-line HTML (no newlines/indent — Streamlit
+            # markdown treats indented multi-line as code block)
+            return (
+                f'<div class="ai-badge">🤖 AI ทำนายเวลาใช้ห้อง: ~{ai} นาที '
+                f'· ใช้ไป <b>{elapsed_min}</b> น.</div>'
+                f'<div style="background:#e0e0e0;border-radius:8px;'
+                f'height:18px;margin-top:4px;overflow:hidden;'
+                f'position:relative;">'
+                f'<div style="background:{bar_color};height:100%;'
+                f'width:{bar_width}%;transition:width 1s ease;'
+                f'border-radius:8px;"></div>'
+                f'<div style="position:absolute;top:0;left:0;right:0;'
+                f'bottom:0;display:flex;align-items:center;'
+                f'justify-content:center;font-size:11px;font-weight:700;'
+                f'color:#333;">{pct}%</div>'
+                f'</div>'
+            )
+        except (ValueError, TypeError):
+            pass
+
+    # Other statuses — แสดงแค่ badge text
+    return (f'<div class="ai-badge">🤖 AI ทำนายเวลาใช้ห้อง: '
+            f'~{ai} นาที</div>')
 
 
 def _ts(val):
@@ -1299,7 +1334,7 @@ def _render_summary_section(s, label, key_prefix):
         m1, m2, m3 = st.columns(3)
         m1.metric("เคสที่มีข้อมูล", n_cases)
         m2.metric("เวลาจริงเฉลี่ย", "%.0f นาที" % avg_actual)
-        m3.metric("AI ทำนายเฉลี่ย", "%.0f นาที" % avg_pred)
+        m3.metric("AI ทำนายเวลาใช้ห้อง (เฉลี่ย)", "%.0f นาที" % avg_pred)
 
         m4, m5, m6 = st.columns(3)
         m4.metric("ค่าผิดพลาดเฉลี่ย (MAE)", "%.1f นาที" % mae)

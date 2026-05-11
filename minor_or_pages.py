@@ -247,7 +247,7 @@ def page_statistics():
         st.markdown(f'<div style="background:white;border-radius:12px;padding:15px;box-shadow:0 2px 4px rgba(0,0,0,0.1);text-align:center;"><div style="color:#7f8c8d;font-size:14px;font-weight:600;">ยกเลิก</div><div style="color:#e74c3c;font-size:32px;font-weight:bold;">{xc}</div></div>', unsafe_allow_html=True)
 
     # AI vs Actual chart
-    st.markdown('<h3 style="color:#34495e;font-size:18px;font-weight:600;margin-top:20px;">🤖 AI ทำนาย vs เวลาจริง</h3>', unsafe_allow_html=True)
+    st.markdown('<h3 style="color:#34495e;font-size:18px;font-weight:600;margin-top:20px;">🤖 AI ทำนายเวลาใช้ห้อง vs เวลาจริง</h3>', unsafe_allow_html=True)
     history = st.session_state.statistics.get('case_history', [])
     hist = [h for h in history if h.get('actual_duration_min') and h.get('ai_predicted_min')]
 
@@ -257,10 +257,10 @@ def page_statistics():
         df_h['error'] = df_h['actual_duration_min'] - df_h['ai_predicted_min']
 
         fig = go.Figure(data=[
-            go.Bar(name='AI ทำนาย', x=df_h['proc_short'], y=df_h['ai_predicted_min'], marker_color='#3498db'),
-            go.Bar(name='เวลาจริง', x=df_h['proc_short'], y=df_h['actual_duration_min'], marker_color='#2ecc71'),
+            go.Bar(name='AI ทำนายเวลาใช้ห้อง', x=df_h['proc_short'], y=df_h['ai_predicted_min'], marker_color='#3498db'),
+            go.Bar(name='เวลาจริง (room duration)', x=df_h['proc_short'], y=df_h['actual_duration_min'], marker_color='#2ecc71'),
         ])
-        fig.update_layout(barmode='group', title='AI ทำนาย vs เวลาจริง', font=dict(family="Sarabun"), height=400, xaxis_title='หัตถการ', yaxis_title='นาที')
+        fig.update_layout(barmode='group', title='AI ทำนายเวลาใช้ห้อง vs เวลาจริง', font=dict(family="Sarabun"), height=400, xaxis_title='หัตถการ', yaxis_title='นาที (Room Duration)')
         st.plotly_chart(fig, use_container_width=True)
 
         mae = df_h['error'].abs().mean()
