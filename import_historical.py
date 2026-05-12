@@ -131,7 +131,8 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
         conn.commit()
     
     inserted = 0
-    skipped = 0
+    updated = 0   # incremental UPDATE counter
+    skipped = 0   # legacy — kept for backward compat (always 0 now)
     results = []
     
     # Ensure requested_date column exists (for traceability + future reclassification)
@@ -160,15 +161,14 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
         if not proc or proc.upper() in ('NAN', 'NONE', ''):
             proc = '-'
         
-        # Check duplicate
+        # Check duplicate (จะ UPDATE ทีหลัง ไม่ skip)
         exists = conn.execute(
             "SELECT case_id FROM cases WHERE op_date=? AND hn=? AND procedure_name=?",
             (op_date, hn, proc)
         ).fetchone()
-        if exists:
-            skipped += 1
-            continue
-        
+        # หมายเหตุ: ไม่ skip — เก็บ case_id ไว้ UPDATE ทีหลัง (incremental import)
+        # ⚠️ ไม่แตะ treatment_cost, patho_cost — เป็นข้อมูลที่ผู้ใช้ใส่เอง
+
         # Get diagnosis
         diag = str(s.get('icd10_name', '') or '').strip()
         if diag.upper() in ('', 'NAN', 'NONE'):
@@ -248,28 +248,52 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
             wait_min = None
             room_no = 32
         
-        if not dry_run:
-            conn.execute("""
-                INSERT INTO cases (op_date, name, hn, an, diagnosis, procedure_name,
-                                  surgeon_name, division_code, case_category, patient_type,
-                                  status, arrived_at, in_or_at, op_end_at, discharged_at,
-                                  actual_duration_min, scrub_nurse, circ_nurse,
-                                  wait_min, room_no, procnote, requested_date)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                op_date, name, hn, an_val, diag, proc,
-                surgeon, division, case_cat, pt_type,
-                status, arrived_at, in_or_at, op_end_at, discharged_at,
-                actual_min, scrub, circ,
-                wait_min, room_no, procnote, req_date,
-            ))
-        
-        inserted += 1
-        results.append({
-            'name': name, 'hn': hn, 'date': op_date, 'proc': proc,
-            'diag': diag, 'status': status,
-            'duration': actual_min, 'wait': wait_min,
-        })
+        if exists:
+            # Incremental UPDATE — ⚠️ ไม่แตะ treatment_cost, patho_cost (ผู้ใช้ใส่เอง)
+            if not dry_run:
+                conn.execute("""
+                    UPDATE cases SET
+                        name=?, an=?, diagnosis=?, surgeon_name=?,
+                        division_code=?, case_category=?, patient_type=?,
+                        status=?, arrived_at=?, in_or_at=?, op_end_at=?,
+                        discharged_at=?, actual_duration_min=?,
+                        scrub_nurse=?, circ_nurse=?, wait_min=?, room_no=?,
+                        procnote=?, requested_date=?
+                    WHERE case_id=?
+                """, (
+                    name, an_val, diag, surgeon, division, case_cat, pt_type,
+                    status, arrived_at, in_or_at, op_end_at, discharged_at,
+                    actual_min, scrub, circ, wait_min, room_no, procnote, req_date,
+                    exists[0]
+                ))
+            updated += 1
+            results.append({
+                'name': name, 'hn': hn, 'date': op_date, 'proc': proc,
+                'diag': diag, 'status': status,
+                'duration': actual_min, 'wait': wait_min, '_action': 'updated',
+            })
+        else:
+            if not dry_run:
+                conn.execute("""
+                    INSERT INTO cases (op_date, name, hn, an, diagnosis, procedure_name,
+                                      surgeon_name, division_code, case_category, patient_type,
+                                      status, arrived_at, in_or_at, op_end_at, discharged_at,
+                                      actual_duration_min, scrub_nurse, circ_nurse,
+                                      wait_min, room_no, procnote, requested_date)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    op_date, name, hn, an_val, diag, proc,
+                    surgeon, division, case_cat, pt_type,
+                    status, arrived_at, in_or_at, op_end_at, discharged_at,
+                    actual_min, scrub, circ,
+                    wait_min, room_no, procnote, req_date,
+                ))
+            inserted += 1
+            results.append({
+                'name': name, 'hn': hn, 'date': op_date, 'proc': proc,
+                'diag': diag, 'status': status,
+                'duration': actual_min, 'wait': wait_min, '_action': 'inserted',
+            })
     
     if not dry_run:
         conn.commit()
@@ -280,12 +304,14 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
               f"{skipped_no_date} missing op_date, "
               f"{skipped_no_hn} missing HN")
 
-    # Stash skip stats on function attribute (accessible to callers like
+    # Stash stats on function attribute (accessible to callers like
     # import_historical_with_costs that want to surface them to the UI)
     import_historical._last_skip_stats = {
         'no_date': skipped_no_date,
         'no_hn': skipped_no_hn,
     }
+    import_historical._last_update_count = updated
+    print(f"[IMPORT] Inserted: {inserted}, Updated: {updated}")
 
     return inserted, skipped, results
 

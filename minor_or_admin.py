@@ -270,6 +270,153 @@ def _get_demo_kpi(current_sim_min):
     }
 
 
+def _render_cost_entry_tab():
+    """Quick Cost Entry — เลือกวันแล้วกรอกราคาทีละหลายเคสในตารางเดียว."""
+    import sqlite3
+    from minor_or_db import DB_PATH
+
+    st.markdown("### 💰 ใส่ราคาผ่าตัด + ราคา patho รายวัน")
+    st.caption("เลือกวันแล้วแก้ราคาในตารางได้เลย — ระบบจะ suggest ราคาจากเคสคล้ายๆ ในอดีตให้")
+
+    # ── Date picker — default = วันล่าสุดที่มีเคสยังไม่มี cost ──
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT op_date FROM cases
+        WHERE (treatment_cost IS NULL OR treatment_cost = 0)
+        ORDER BY op_date DESC LIMIT 1
+    """)
+    row = cur.fetchone()
+    default_date = row[0] if row else _now_bkk().strftime('%Y-%m-%d')
+    try:
+        default_dt = datetime.strptime(default_date, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        default_dt = _now_bkk().date()
+
+    col_d, col_btn = st.columns([2, 1])
+    with col_d:
+        target_date = st.date_input(
+            "📅 เลือกวันที่",
+            value=default_dt,
+            format="YYYY/MM/DD",
+            key='cost_entry_date',
+        )
+    target_iso = target_date.strftime('%Y-%m-%d')
+
+    # ── Load cases ของวันนั้น ──
+    cur.execute("""
+        SELECT case_id, hn, name, procedure_name, surgeon_name, status,
+               actual_duration_min, treatment_cost, patho_cost,
+               in_or_at, case_category, patient_type
+        FROM cases
+        WHERE op_date = ?
+        ORDER BY in_or_at
+    """, (target_iso,))
+    cases = cur.fetchall()
+
+    if not cases:
+        conn.close()
+        st.info(f"ไม่พบเคสในวันที่ {target_iso}")
+        return
+
+    # ── Suggest costs จากอดีต (เคสคล้ายๆ) ──
+    def _suggest_cost(proc_name):
+        if not proc_name:
+            return None, None, 0
+        # Normalize keywords
+        kw = proc_name.lower()
+        for keyword in ['morpheus', 'excision bx', 'excision', 'i&d', 'i and d',
+                        'eswl', 'tcc', 'stitch off', 'partial nail', 'correction',
+                        'ssv ligation', 'midline', 'callus', 'biopsy']:
+            if keyword.replace(' ', '').replace('&', '') in kw.replace(' ', '').replace('&', ''):
+                r = cur.execute("""
+                    SELECT AVG(treatment_cost), AVG(patho_cost), COUNT(*)
+                    FROM cases
+                    WHERE op_date < ? AND treatment_cost > 0
+                      AND LOWER(procedure_name) LIKE ?
+                """, (target_iso, f'%{keyword}%')).fetchone()
+                if r and r[2]:
+                    return (int(r[0] or 0), int(r[1] or 0), r[2])
+        return None, None, 0
+
+    # ── Build DataFrame for st.data_editor ──
+    rows = []
+    for c in cases:
+        cid, hn, name, proc, surg, status, dur, treat, patho, tin, cat, ptype = c
+        sug_treat, sug_patho, n_past = _suggest_cost(proc)
+        tin_s = tin.split(' ')[1][:5] if tin else '-'
+        rows.append({
+            'case_id': cid,
+            'HN': hn,
+            'ชื่อ': (name or '-')[:25],
+            'หัตถการ': (proc or '-')[:30],
+            'แพทย์': (surg or '-')[:20],
+            'เวลาเข้าห้อง': tin_s,
+            'นาที': dur or 0,
+            'สถานะ': 'ยกเลิก' if status == 'cancelled' else 'เสร็จ',
+            'ราคาผ่า': int(treat or 0) if treat else (sug_treat or 0),
+            'ราคา patho': int(patho or 0) if patho else (sug_patho or 0),
+            'เคยคิด (อดีต)': f"~{sug_treat:,}/{sug_patho:,} ({n_past}เคส)" if sug_treat else "—",
+        })
+    conn.close()
+
+    df = pd.DataFrame(rows)
+
+    # ── Editor ──
+    st.markdown(f"**📋 {len(df)} เคสในวันที่ {target_iso}** — กรอกตรงช่องราคาได้เลย")
+    edited = st.data_editor(
+        df,
+        column_config={
+            "case_id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
+            "HN": st.column_config.TextColumn("HN", disabled=True, width="small"),
+            "ชื่อ": st.column_config.TextColumn("ชื่อ", disabled=True),
+            "หัตถการ": st.column_config.TextColumn("หัตถการ", disabled=True),
+            "แพทย์": st.column_config.TextColumn("แพทย์", disabled=True),
+            "เวลาเข้าห้อง": st.column_config.TextColumn("เข้าห้อง", disabled=True, width="small"),
+            "นาที": st.column_config.NumberColumn("นาที", disabled=True, width="small"),
+            "สถานะ": st.column_config.TextColumn("สถานะ", disabled=True, width="small"),
+            "ราคาผ่า": st.column_config.NumberColumn(
+                "💰 ราคาผ่า (บาท)",
+                min_value=0, step=100, format="%d",
+                help="กรอกราคาที่เก็บจริง (ค่าที่ suggest มาจากเคสคล้ายๆ อดีต)",
+            ),
+            "ราคา patho": st.column_config.NumberColumn(
+                "🔬 patho (บาท)",
+                min_value=0, step=50, format="%d",
+            ),
+            "เคยคิด (อดีต)": st.column_config.TextColumn("ราคาอ้างอิงอดีต", disabled=True),
+        },
+        hide_index=True,
+        use_container_width=True,
+        key=f'cost_editor_{target_iso}',
+    )
+
+    # ── Save button ──
+    col_save, col_total = st.columns([1, 2])
+    with col_save:
+        save_clicked = st.button('💾 บันทึกทั้งหมด', type='primary', use_container_width=True)
+    with col_total:
+        total_treat = edited['ราคาผ่า'].sum()
+        total_patho = edited['ราคา patho'].sum()
+        st.metric("รวมรายได้วันนี้", f"{total_treat + total_patho:,} บาท",
+                  delta=f"ผ่า {total_treat:,} + patho {total_patho:,}")
+
+    if save_clicked:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        n_updated = 0
+        for _, row in edited.iterrows():
+            cur.execute(
+                "UPDATE cases SET treatment_cost=?, patho_cost=? WHERE case_id=?",
+                (int(row['ราคาผ่า']), int(row['ราคา patho']), int(row['case_id']))
+            )
+            n_updated += cur.rowcount
+        conn.commit()
+        conn.close()
+        st.success(f"✅ บันทึกราคา {n_updated} เคสสำเร็จ (วันที่ {target_iso})")
+        st.balloons()
+
+
 def _render_demo_controls():
     """แสดง toggle + controls ของ Demo Mode. Return current sim_min หรือ None."""
     state = st.session_state.setdefault('demo', {
@@ -1425,11 +1572,16 @@ def page_admin():
     """, unsafe_allow_html=True)
 
     # ===== TABS =====
-    tab_today, tab_history, tab_ai = st.tabs([
+    tab_today, tab_cost, tab_history, tab_ai = st.tabs([
         "📋 ภาพรวมวันนี้",
+        "💰 ใส่ราคารายวัน",
         "📈 สถิติย้อนหลัง",
         "🤖 AI Prediction (งานวิจัย)",
     ])
+
+    # -- TAB 2: Quick Cost Entry (วันที่ + ตารางกรอกราคา) --
+    with tab_cost:
+        _render_cost_entry_tab()
 
     # -- TAB 1: Today overview --
     with tab_today:
