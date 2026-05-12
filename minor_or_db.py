@@ -1791,7 +1791,90 @@ def get_historical_analytics(date_from=None, date_to=None):
             peak_hour = int(ps['hour'])
             peak_hour_count = int(ps['n'])
     else:
+        df_rec = pd.DataFrame(columns=['dow', 'hour'])
         heatmap_df = pd.DataFrame(columns=['dow', 'hour', 'n'])
+
+    # ============================================================
+    # Top day-of-week (จ.-ศ. เท่านั้น) + ช่วงเวลาเคสเยอะของวันนั้น
+    # ============================================================
+    THAI_DAY_FULL = ['จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์','อาทิตย์']
+    top_dow_idx = -1
+    top_dow_count = 0
+    top_dow_name = '-'
+    top_dow_hour = peak_hour
+    if not daily_total.empty:
+        _dt = daily_total.copy()
+        _dt['dow'] = _dt['op_date'].apply(
+            lambda d: pd.to_datetime(d).dayofweek if d else None)
+        _wd = _dt[_dt['dow'].isin([0, 1, 2, 3, 4])]
+        if not _wd.empty:
+            _dow_sum = _wd.groupby('dow')['n_cases'].sum().reset_index()
+            _top = _dow_sum.loc[_dow_sum['n_cases'].idxmax()]
+            top_dow_idx = int(_top['dow'])
+            top_dow_count = int(_top['n_cases'])
+            top_dow_name = THAI_DAY_FULL[top_dow_idx]
+            # หา peak hour ของ dow นั้นโดยเฉพาะ
+            if not df_rec.empty:
+                _hh = df_rec[df_rec['dow'] == top_dow_idx]
+                if not _hh.empty:
+                    _hc = _hh.groupby('hour').size().reset_index(name='n')
+                    top_dow_hour = int(_hc.loc[_hc['n'].idxmax()]['hour'])
+
+    # ============================================================
+    # Utilization Rate (Coverage 8:00-16:00, นับเฉพาะวันที่มีเคส)
+    # = นาทีที่มีเคสในห้อง (union ของช่วงเวลา) ÷ (วันมีเคส × 480 นาที)
+    # ============================================================
+    WORK_START_HOUR = 8
+    WORK_END_HOUR = 16
+    WORK_MIN_PER_DAY = (WORK_END_HOUR - WORK_START_HOUR) * 60  # 480
+    util_active_min = 0
+    util_n_days = 0
+    if not hour_df.empty:
+        cases_by_date = {}
+        for _, _r in hour_df.iterrows():
+            _od = _r.get('op_date')
+            if not _od:
+                continue
+            try:
+                _ts = datetime.strptime(_r['in_or_at'], '%Y-%m-%d %H:%M:%S')
+                _te = datetime.strptime(_r['op_end_at'], '%Y-%m-%d %H:%M:%S')
+            except (ValueError, TypeError):
+                continue
+            if _te <= _ts:
+                continue
+            cases_by_date.setdefault(_od, []).append((_ts, _te))
+
+        for _od, _ivs in cases_by_date.items():
+            try:
+                _dd = datetime.strptime(_od, '%Y-%m-%d')
+            except (ValueError, TypeError):
+                continue
+            _ws = _dd.replace(hour=WORK_START_HOUR, minute=0, second=0)
+            _we = _dd.replace(hour=WORK_END_HOUR, minute=0, second=0)
+            # clip เคสให้อยู่ในช่วง 8-16
+            _clipped = []
+            for _s, _e in _ivs:
+                _cs = max(_s, _ws)
+                _ce = min(_e, _we)
+                if _cs < _ce:
+                    _clipped.append((_cs, _ce))
+            if not _clipped:
+                continue
+            # union ของ intervals (รวม overlap)
+            _clipped.sort()
+            _merged = [_clipped[0]]
+            for _s, _e in _clipped[1:]:
+                _ls, _le = _merged[-1]
+                if _s <= _le:
+                    _merged[-1] = (_ls, max(_le, _e))
+                else:
+                    _merged.append((_s, _e))
+            for _s, _e in _merged:
+                util_active_min += (_e - _s).total_seconds() / 60
+            util_n_days += 1
+
+    util_total_min = util_n_days * WORK_MIN_PER_DAY
+    util_rate = round(util_active_min / util_total_min * 100, 1) if util_total_min > 0 else 0
 
     div_df = pd.read_sql_query(
         f"SELECT division_code, COUNT(*) as n FROM cases WHERE {where_sql} GROUP BY division_code ORDER BY n DESC",
@@ -1831,6 +1914,16 @@ def get_historical_analytics(date_from=None, date_to=None):
         'heatmap_df': heatmap_df,
         'dow_counts': dow_counts,
         'peak_hour': peak_hour, 'peak_hour_count': peak_hour_count,
+        # Top day-of-week (จ.-ศ.)
+        'top_dow_idx': top_dow_idx,
+        'top_dow_name': top_dow_name,
+        'top_dow_count': top_dow_count,
+        'top_dow_hour': top_dow_hour,
+        # Utilization Rate (Coverage 8-16, วันมีเคสเท่านั้น)
+        'util_rate': util_rate,
+        'util_active_min': int(util_active_min),
+        'util_total_min': int(util_total_min),
+        'util_n_days': util_n_days,
         'div_df': div_df,
         'top_div_name': top_div_name, 'top_div_count': top_div_count, 'top_div_pct': top_div_pct,
         'proc_df': proc_df,

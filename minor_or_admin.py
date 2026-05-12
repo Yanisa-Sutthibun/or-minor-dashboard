@@ -980,32 +980,41 @@ def _render_historical_analytics(date_from: str, date_to: str):
             <div class="kpi-value" style="color:#1565c0;">{data['total_cases']}</div>
         </div>""", unsafe_allow_html=True)
     with c2:
-        peak_label = '—'
-        if data['peak_date']:
-            try:
-                dt = datetime.strptime(data['peak_date'], '%Y-%m-%d')
-                _THAI_DAY = ['จ.','อ.','พ.','พฤ.','ศ.','ส.','อา.']
-                peak_label = f"{_THAI_DAY[dt.weekday()]} {dt.strftime('%d/%m')}"
-            except (ValueError, TypeError):
-                peak_label = str(data['peak_date'])
+        # การ์ดใหม่: รวม "วันที่ยุ่ง (จ-ศ) + ช่วงเวลายุ่ง"
+        _tdn = data.get('top_dow_name', '-')
+        _tdh = data.get('top_dow_hour', 0)
+        _tdc = data.get('top_dow_count', 0)
+        if _tdn != '-':
+            _peak_dh = f"{_tdn} {_tdh:02d}:00 น."
+        else:
+            _peak_dh = '—'
         st.markdown(f"""
         <div class="kpi-card">
-            <div class="kpi-label">วันที่เคสเยอะสุด</div>
-            <div class="kpi-value" style="color:#1565c0;font-size:22px;">{peak_label}</div>
-            <div style="font-size:12px;color:#999;">{data['peak_count']} เคส</div>
+            <div class="kpi-label">วัน+ช่วงเวลาเคสเยอะ</div>
+            <div class="kpi-value" style="color:#1565c0;font-size:18px;">{_peak_dh}</div>
+            <div style="font-size:12px;color:#999;">วัน{_tdn}รวม {_tdc} เคส</div>
         </div>""", unsafe_allow_html=True)
     with c3:
-        # Peak-hour KPI now reports OR-occupancy minutes (Level-3 utilization)
-        _phc = data['peak_hour_count']
-        if _phc >= 60:
-            _phc_label = f"{_phc//60} ชม. {_phc%60} นาที"
+        # Utilization Rate (Coverage 8:00-16:00, นับเฉพาะวันที่มีเคส)
+        # = นาทีที่มีเคสในห้อง ÷ (วันมีเคส × 480 นาที)
+        _ur = data.get('util_rate', 0)
+        _uam = data.get('util_active_min', 0)
+        _utm = data.get('util_total_min', 0)
+        _und = data.get('util_n_days', 0)
+        _uah = round(_uam / 60, 1)
+        _uth = round(_utm / 60, 1)
+        # สีไล่ตามเปอร์เซ็นต์ — เขียว/ส้ม/แดง
+        if _ur >= 70:
+            _ur_color = '#2e7d32'
+        elif _ur >= 40:
+            _ur_color = '#e65100'
         else:
-            _phc_label = f"{_phc} นาที"
+            _ur_color = '#c62828'
         st.markdown(f"""
         <div class="kpi-card">
-            <div class="kpi-label">ช่วงยุ่งสุด</div>
-            <div class="kpi-value" style="color:#e65100;font-size:22px;">{data['peak_hour']:02d}:00</div>
-            <div style="font-size:12px;color:#999;">ห้องถูกใช้ {_phc_label}</div>
+            <div class="kpi-label">Utilization Rate</div>
+            <div class="kpi-value" style="color:{_ur_color};font-size:22px;">{_ur}%</div>
+            <div style="font-size:12px;color:#999;">{_uah}/{_uth} ชม. · {_und} วัน</div>
         </div>""", unsafe_allow_html=True)
     with c4:
         st.markdown(f"""
