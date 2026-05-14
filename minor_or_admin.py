@@ -1436,6 +1436,8 @@ def _render_historical_analytics(date_from: str, date_to: str):
     # -- Summary KPI (สะสม) --
     st.markdown('<div class="section-title">📋 สรุปยอดสะสม</div>', unsafe_allow_html=True)
     s_all = get_summary(date_from=date_from, date_to=date_to)
+    st.markdown('<div style="font-size:13px;color:#777;margin:4px 0 6px;">📊 ภาพรวม</div>',
+                unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("เคสทั้งหมด", s_all['total'])
     k2.metric("ผ่าเสร็จ", s_all['completed'])
@@ -1443,18 +1445,18 @@ def _render_historical_analytics(date_from: str, date_to: str):
     cancel_r = s_all['cancelled'] / s_all['total'] * 100 if s_all['total'] > 0 else 0
     k4.metric("อัตรายกเลิก", "%.0f%%" % cancel_r)
 
-    k5, k6, k7, k8 = st.columns(4)
+    # 🏥 ผู้ป่วย — เหลือแค่ OPD/IPD (เคสนัดหมาย/Walk-in ย้ายไปอยู่ใน Elective card)
+    st.markdown('<div style="font-size:13px;color:#777;margin:14px 0 6px;">🏥 ผู้ป่วย</div>',
+                unsafe_allow_html=True)
+    k5, k6 = st.columns(2)
     k5.metric("OPD", s_all['n_opd'])
     k6.metric("IPD", s_all['n_ipd'])
-    k7.metric("เคสนัดหมาย", s_all['n_set'])
-    k8.metric("Walk-in", s_all['n_walkin'])
 
-    # KPI op_type — Elective / Urgent / Emergency
+    # ⚠️ ระดับความเร่งด่วน — Elective (มี breakdown นัดหมาย/Walk-in) / Urgent / Emergency
     # NULL หรือ missing → ถือเป็น "elective" (default ของ minor OR)
     df_op = get_cases()
     df_op = df_op[(df_op['op_date'] >= date_from) & (df_op['op_date'] <= date_to)]
     if 'op_type' in df_op.columns:
-        # normalize: NULL/empty → 'elective'
         op_norm = (df_op['op_type'].fillna('elective')
                    .astype(str).str.lower().str.strip()
                    .replace('', 'elective'))
@@ -1462,10 +1464,44 @@ def _render_historical_analytics(date_from: str, date_to: str):
         n_urg = int((op_norm == 'urgent').sum())
         n_emer = int((op_norm == 'emergency').sum())
         n_other = len(df_op) - n_elec - n_urg - n_emer
+
+        # breakdown ภายใน Elective: เคสนัดหมาย vs Walk-in
+        if 'case_category' in df_op.columns:
+            mask_elec = (op_norm == 'elective')
+            n_elec_set = int(((df_op['case_category'] == 'เคสนัดหมาย') & mask_elec).sum())
+            n_elec_walkin = int(((df_op['case_category'] == 'Walk-in') & mask_elec).sum())
+        else:
+            n_elec_set = s_all.get('n_set', 0)
+            n_elec_walkin = s_all.get('n_walkin', 0)
+
+        st.markdown('<div style="font-size:13px;color:#777;margin:14px 0 6px;">⚠️ ระดับความเร่งด่วน</div>',
+                    unsafe_allow_html=True)
         ko1, ko2, ko3 = st.columns(3)
-        ko1.metric("📋 Elective", n_elec, help="รวมเคสที่ไม่ได้ระบุ op_type")
-        ko2.metric("⚡ Urgent", n_urg)
-        ko3.metric("🚨 Emergency", n_emer)
+        with ko1:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">📋 Elective</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;margin-bottom:8px;">{n_elec}</div>'
+                f'<div style="font-size:12px;color:#888;display:flex;gap:10px;">'
+                f'<span>นัดหมาย <b style="color:#444;font-weight:500;">{n_elec_set}</b></span>'
+                f'<span style="color:#ccc;">|</span>'
+                f'<span>Walk-in <b style="color:#444;font-weight:500;">{n_elec_walkin}</b></span>'
+                f'</div></div>',
+                unsafe_allow_html=True)
+        with ko2:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">⚡ Urgent</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;">{n_urg}</div>'
+                f'</div>',
+                unsafe_allow_html=True)
+        with ko3:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">🚨 Emergency</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;">{n_emer}</div>'
+                f'</div>',
+                unsafe_allow_html=True)
         if n_other > 0:
             st.caption(f"⚠️ มี {n_other} เคสที่ op_type เป็นค่าอื่น "
                        f"(re-upload schedule.xls เพื่ออัปเดต)")
