@@ -124,6 +124,23 @@ _ADMIN_CSS = """
     margin: 20px 0 10px; padding-bottom: 6px;
     border-bottom: 2px solid #e0e0e0;
 }
+/* Group header (level 1): big colored heading for sections */
+.group-header {
+    font-size: 18px; font-weight: 700; color: #1565c0;
+    margin: 32px 0 14px; padding: 10px 18px;
+    background: #e3f2fd;
+    border-left: 5px solid #1565c0; border-radius: 6px;
+}
+.group-header.green   { color: #2e7d32; background: #e8f5e9; border-left-color: #2e7d32; }
+.group-header.purple  { color: #6a1b9a; background: #f3e5f5; border-left-color: #6a1b9a; }
+.group-header.orange  { color: #e65100; background: #fff3e0; border-left-color: #e65100; }
+.group-header.teal    { color: #00695c; background: #e0f2f1; border-left-color: #00695c; }
+.group-header.indigo  { color: #283593; background: #e8eaf6; border-left-color: #283593; }
+/* Subsection (level 2): smaller header inside a group */
+.sub-title {
+    font-size: 14px; font-weight: 600; color: #546e7a;
+    margin: 14px 0 6px;
+}
 </style>
 """
 
@@ -1110,7 +1127,10 @@ def _render_nurse_progress(op_date: str):
 # ============================================================================
 
 def _render_historical_analytics(date_from: str, date_to: str):
-    """Tab stats yonlang - 4 metric cards + 4 charts + export."""
+    """Tab สถิติย้อนหลัง — จัดเรียงตามหลัก information architecture (general→specific):
+    1. 🎯 KPI Highlights → 2. 📋 สรุปยอดสะสม → 3. 📈 แนวโน้มเวลา →
+    4. 🏆 อันดับยอดนิยม → 5. ⏱️ ประสิทธิภาพ → 6. 🌙 นอกเวลา → 7. 💾 Export
+    """
 
     data = get_historical_analytics(date_from, date_to)
 
@@ -1118,7 +1138,11 @@ def _render_historical_analytics(date_from: str, date_to: str):
         st.info("ยังไม่มีข้อมูลเคสที่เสร็จแล้วในช่วงนี้ — เริ่มใช้งานแล้วสถิติจะสะสมอัตโนมัติ")
         return
 
-    # -- Metric cards --
+    # ════════════════════════════════════════════════════════════════
+    # 1️⃣  🎯 KPI HIGHLIGHTS — เลขสำคัญที่กรรมการต้องเห็นก่อน
+    # ════════════════════════════════════════════════════════════════
+    st.markdown('<div class="group-header">🎯 KPI Highlights</div>',
+                unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown(f"""
@@ -1171,10 +1195,112 @@ def _render_historical_analytics(date_from: str, date_to: str):
             <div style="font-size:12px;color:#999;">{data['top_div_count']} เคส ({data['top_div_pct']}%)</div>
         </div>""", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    # ════════════════════════════════════════════════════════════════
+    # 2️⃣  📋 สรุปยอดสะสม — categorical breakdowns
+    # ════════════════════════════════════════════════════════════════
+    st.markdown('<div class="group-header green">📋 สรุปยอดสะสม</div>',
+                unsafe_allow_html=True)
+    s_all = get_summary(date_from=date_from, date_to=date_to)
 
-    # -- Chart 1: cases per day --
-    st.markdown('<div class="section-title">📊 จำนวนเคสรายวัน</div>', unsafe_allow_html=True)
+    # 📊 ภาพรวม + ผู้ป่วย — รวมเป็น row เดียว 4 cards (sub-info ใต้)
+    st.markdown('<div class="sub-title">📊 ภาพรวม</div>', unsafe_allow_html=True)
+    cancel_r = s_all['cancelled'] / s_all['total'] * 100 if s_all['total'] > 0 else 0
+    opd_pct = (s_all['n_opd'] / s_all['total'] * 100) if s_all['total'] > 0 else 0
+    ipd_pct = (s_all['n_ipd'] / s_all['total'] * 100) if s_all['total'] > 0 else 0
+
+    def _stat_card(label, value, sub_text, value_color='#212121'):
+        return (
+            f'<div style="background:#f5f5f5;border-radius:8px;padding:14px;">'
+            f'<div style="font-size:12px;color:#757575;margin-bottom:4px;">{label}</div>'
+            f'<div style="font-size:26px;font-weight:500;line-height:1;color:{value_color};">{value}</div>'
+            f'<div style="font-size:11px;color:#9e9e9e;margin-top:4px;">{sub_text}</div>'
+            f'</div>'
+        )
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(_stat_card("📊 เคสทั้งหมด", s_all['total'],
+                               f"✓ ผ่าตัดสำเร็จ {s_all['completed']}",
+                               value_color='#1565c0'), unsafe_allow_html=True)
+    with k2:
+        st.markdown(_stat_card("🏥 OPD", s_all['n_opd'], f"{opd_pct:.1f}%"),
+                    unsafe_allow_html=True)
+    with k3:
+        st.markdown(_stat_card("🏨 IPD", s_all['n_ipd'], f"{ipd_pct:.1f}%"),
+                    unsafe_allow_html=True)
+    with k4:
+        st.markdown(_stat_card("⚠️ ยกเลิก", s_all['cancelled'],
+                               f"อัตรา {cancel_r:.0f}%",
+                               value_color='#c62828'), unsafe_allow_html=True)
+
+    # ⚠️ ระดับความเร่งด่วน — Elective (มี breakdown นัดหมาย/Walk-in) / Urgent / Emergency
+    df_op = get_cases()
+    df_op = df_op[(df_op['op_date'] >= date_from) & (df_op['op_date'] <= date_to)]
+    if 'op_type' in df_op.columns:
+        op_norm = (df_op['op_type'].fillna('elective')
+                   .astype(str).str.lower().str.strip()
+                   .replace('', 'elective'))
+        n_elec = int((op_norm == 'elective').sum())
+        n_urg = int((op_norm == 'urgent').sum())
+        n_emer = int((op_norm == 'emergency').sum())
+        n_other = len(df_op) - n_elec - n_urg - n_emer
+
+        if 'case_category' in df_op.columns:
+            mask_elec = (op_norm == 'elective')
+            n_elec_set = int(((df_op['case_category'] == 'เคสนัดหมาย') & mask_elec).sum())
+            n_elec_walkin = int(((df_op['case_category'] == 'Walk-in') & mask_elec).sum())
+        else:
+            n_elec_set = s_all.get('n_set', 0)
+            n_elec_walkin = s_all.get('n_walkin', 0)
+
+        st.markdown('<div class="sub-title">⚠️ ระดับความเร่งด่วน</div>',
+                    unsafe_allow_html=True)
+        ko1, ko2, ko3 = st.columns(3)
+        with ko1:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">📋 Elective</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;margin-bottom:8px;">{n_elec}</div>'
+                f'<div style="font-size:12px;color:#888;display:flex;gap:10px;">'
+                f'<span>นัดหมาย <b style="color:#444;font-weight:500;">{n_elec_set}</b></span>'
+                f'<span style="color:#ccc;">|</span>'
+                f'<span>Walk-in <b style="color:#444;font-weight:500;">{n_elec_walkin}</b></span>'
+                f'</div></div>',
+                unsafe_allow_html=True)
+        with ko2:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">⚡ Urgent</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;">{n_urg}</div>'
+                f'</div>',
+                unsafe_allow_html=True)
+        with ko3:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">🚨 Emergency</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;">{n_emer}</div>'
+                f'</div>',
+                unsafe_allow_html=True)
+        if n_other > 0:
+            st.caption(f"⚠️ มี {n_other} เคสที่ op_type เป็นค่าอื่น "
+                       f"(re-upload schedule.xls เพื่ออัปเดต)")
+
+    # NOTE (thesis mode): ซ่อน KPI cost/patho — เปิดกลับโดย uncomment
+    # k9, k10, k11, k12 = st.columns(4)
+    # k9.metric("💰 ค่าหัตถการ", f"{s_all['total_treatment']:,} ฿")
+    # k10.metric("💵 รายได้รวม", f"{s_all['total_revenue']:,} ฿")
+    # k11.metric("🧬 ส่งชิ้นเนื้อ", f"{s_all['n_patho_sent']} ราย")
+    # k12.metric("🔬 ค่าชิ้นเนื้อ", f"{s_all['total_patho']:,} ฿")
+
+    # ════════════════════════════════════════════════════════════════
+    # 3️⃣  📈 แนวโน้มเวลา — เคสรายวัน + heatmap (เห็น pattern)
+    # ════════════════════════════════════════════════════════════════
+    st.markdown('<div class="group-header purple">📈 แนวโน้มเวลา</div>',
+                unsafe_allow_html=True)
+
+    # 📊 จำนวนเคสรายวัน
+    st.markdown('<div class="sub-title">📊 จำนวนเคสรายวัน</div>',
+                unsafe_allow_html=True)
     daily = data['daily_total']
     if not daily.empty:
         daily = daily.copy()
@@ -1191,11 +1317,9 @@ def _render_historical_analytics(date_from: str, date_to: str):
     else:
         st.caption("ยังไม่มีข้อมูลรายวัน")
 
-    # -- Chart 2 & 3: Heatmap + Division --
-    col_left, col_right = st.columns(2)
-
-    with col_left:
-        st.markdown('<div class="section-title">🔥 ภาระงานห้องผ่าตัดเล็ก (เฉลี่ยเคสต่อครั้ง)</div>',
+    # 🔥 ภาระงานห้องผ่าตัด (full width — ส่วนของ "📈 แนวโน้มเวลา" group)
+    with st.container():
+        st.markdown('<div class="sub-title">🔥 ภาระงานห้องผ่าตัด (เฉลี่ยเคสต่อครั้ง)</div>',
                     unsafe_allow_html=True)
         hm = data['heatmap_df']
         dow_counts = data.get('dow_counts', {})
@@ -1328,23 +1452,31 @@ def _render_historical_analytics(date_from: str, date_to: str):
         else:
             st.caption("ยังไม่มีข้อมูลเวลา (ต้องมีเคสที่กดปุ่ม 'เข้าห้อง' และ 'เสร็จ' แล้ว)")
 
-    with col_right:
-        st.markdown('<div class="section-title">🏥 สาขาที่ผ่าตัดเยอะ</div>', unsafe_allow_html=True)
-        div_df = data['div_df']
-        if not div_df.empty:
-            fig = px.bar(div_df.head(8), x='n', y='division_name', orientation='h',
-                         labels={'n': 'จำนวนเคส', 'division_name': 'สาขา'},
-                         color_discrete_sequence=['#7e57c2'])
-            fig.update_layout(
-                margin=dict(t=10, b=10, l=10, r=10), height=240,
-                yaxis=dict(autorange='reversed'),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.caption("ยังไม่มีข้อมูลสาขา")
+    # ════════════════════════════════════════════════════════════════
+    # 4️⃣  🏆 อันดับยอดนิยม — สาขา + Top หัตถการ
+    # ════════════════════════════════════════════════════════════════
+    st.markdown('<div class="group-header orange">🏆 อันดับยอดนิยม</div>',
+                unsafe_allow_html=True)
 
-    # -- Chart 4: Top procedures (with fuzzy grouping) --
-    st.markdown('<div class="section-title">🔬 Top หัตถการที่ทำบ่อย</div>', unsafe_allow_html=True)
+    # 🏥 สาขาที่ผ่าตัดเยอะ
+    st.markdown('<div class="sub-title">🏥 สาขาที่ผ่าตัดเยอะ</div>',
+                unsafe_allow_html=True)
+    div_df = data['div_df']
+    if not div_df.empty:
+        fig = px.bar(div_df.head(8), x='n', y='division_name', orientation='h',
+                     labels={'n': 'จำนวนเคส', 'division_name': 'สาขา'},
+                     color_discrete_sequence=['#7e57c2'])
+        fig.update_layout(
+            margin=dict(t=10, b=10, l=10, r=10), height=240,
+            yaxis=dict(autorange='reversed'),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.caption("ยังไม่มีข้อมูลสาขา")
+
+    # 🔬 Top หัตถการที่ทำบ่อย
+    st.markdown('<div class="sub-title">🔬 Top หัตถการที่ทำบ่อย</div>',
+                unsafe_allow_html=True)
     proc_df = data['proc_df']
     if not proc_df.empty:
         # รวมหัตถการที่คล้ายกัน เช่น Off PERM/Off TCC, nail extraction, excision/Excision
@@ -1366,11 +1498,16 @@ def _render_historical_analytics(date_from: str, date_to: str):
     else:
         st.caption("ยังไม่มีข้อมูลหัตถการ")
 
-    # -- Wait time + Handover trends --
+    # ════════════════════════════════════════════════════════════════
+    # 5️⃣  ⏱️ ประสิทธิภาพการให้บริการ — เวลารอ + รับเวร
+    # ════════════════════════════════════════════════════════════════
+    st.markdown('<div class="group-header teal">⏱️ ประสิทธิภาพการให้บริการ</div>',
+                unsafe_allow_html=True)
     col_wt, col_ho = st.columns(2)
 
     with col_wt:
-        st.markdown('<div class="section-title">⏱️ เวลารอผู้ป่วย</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-title">⏱️ เวลารอผู้ป่วย</div>',
+                    unsafe_allow_html=True)
         wt = get_wait_stats(date_from, date_to)
         # KPI row
         m1, m2, m3 = st.columns(3)
@@ -1395,7 +1532,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
             st.plotly_chart(fig, use_container_width=True)
 
     with col_ho:
-        st.markdown('<div class="section-title">🔄 สถิติรับเวร (หลัง 15:30)</div>',
+        st.markdown('<div class="sub-title">🔄 สถิติรับเวร (หลัง 15:30)</div>',
                     unsafe_allow_html=True)
         ho = get_handover_stats(date_from, date_to)
         m1, m2, m3 = st.columns(3)
@@ -1431,90 +1568,11 @@ def _render_historical_analytics(date_from: str, date_to: str):
                 st.dataframe(hc[show_cols].rename(columns=col_rename),
                              use_container_width=True, hide_index=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # -- Summary KPI (สะสม) --
-    st.markdown('<div class="section-title">📋 สรุปยอดสะสม</div>', unsafe_allow_html=True)
-    s_all = get_summary(date_from=date_from, date_to=date_to)
-    st.markdown('<div style="font-size:13px;color:#777;margin:4px 0 6px;">📊 ภาพรวม</div>',
+    # ════════════════════════════════════════════════════════════════
+    # 6️⃣  🌙 เคสนอกเวลา (สะสม)
+    # ════════════════════════════════════════════════════════════════
+    st.markdown('<div class="group-header indigo">🌙 เคสนอกเวลา (สะสม)</div>',
                 unsafe_allow_html=True)
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("เคสทั้งหมด", s_all['total'])
-    k2.metric("ผ่าเสร็จ", s_all['completed'])
-    k3.metric("ยกเลิก", s_all['cancelled'])
-    cancel_r = s_all['cancelled'] / s_all['total'] * 100 if s_all['total'] > 0 else 0
-    k4.metric("อัตรายกเลิก", "%.0f%%" % cancel_r)
-
-    # 🏥 ผู้ป่วย — เหลือแค่ OPD/IPD (เคสนัดหมาย/Walk-in ย้ายไปอยู่ใน Elective card)
-    st.markdown('<div style="font-size:13px;color:#777;margin:14px 0 6px;">🏥 ผู้ป่วย</div>',
-                unsafe_allow_html=True)
-    k5, k6 = st.columns(2)
-    k5.metric("OPD", s_all['n_opd'])
-    k6.metric("IPD", s_all['n_ipd'])
-
-    # ⚠️ ระดับความเร่งด่วน — Elective (มี breakdown นัดหมาย/Walk-in) / Urgent / Emergency
-    # NULL หรือ missing → ถือเป็น "elective" (default ของ minor OR)
-    df_op = get_cases()
-    df_op = df_op[(df_op['op_date'] >= date_from) & (df_op['op_date'] <= date_to)]
-    if 'op_type' in df_op.columns:
-        op_norm = (df_op['op_type'].fillna('elective')
-                   .astype(str).str.lower().str.strip()
-                   .replace('', 'elective'))
-        n_elec = int((op_norm == 'elective').sum())
-        n_urg = int((op_norm == 'urgent').sum())
-        n_emer = int((op_norm == 'emergency').sum())
-        n_other = len(df_op) - n_elec - n_urg - n_emer
-
-        # breakdown ภายใน Elective: เคสนัดหมาย vs Walk-in
-        if 'case_category' in df_op.columns:
-            mask_elec = (op_norm == 'elective')
-            n_elec_set = int(((df_op['case_category'] == 'เคสนัดหมาย') & mask_elec).sum())
-            n_elec_walkin = int(((df_op['case_category'] == 'Walk-in') & mask_elec).sum())
-        else:
-            n_elec_set = s_all.get('n_set', 0)
-            n_elec_walkin = s_all.get('n_walkin', 0)
-
-        st.markdown('<div style="font-size:13px;color:#777;margin:14px 0 6px;">⚠️ ระดับความเร่งด่วน</div>',
-                    unsafe_allow_html=True)
-        ko1, ko2, ko3 = st.columns(3)
-        with ko1:
-            st.markdown(
-                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
-                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">📋 Elective</div>'
-                f'<div style="font-size:28px;font-weight:500;line-height:1.1;margin-bottom:8px;">{n_elec}</div>'
-                f'<div style="font-size:12px;color:#888;display:flex;gap:10px;">'
-                f'<span>นัดหมาย <b style="color:#444;font-weight:500;">{n_elec_set}</b></span>'
-                f'<span style="color:#ccc;">|</span>'
-                f'<span>Walk-in <b style="color:#444;font-weight:500;">{n_elec_walkin}</b></span>'
-                f'</div></div>',
-                unsafe_allow_html=True)
-        with ko2:
-            st.markdown(
-                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
-                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">⚡ Urgent</div>'
-                f'<div style="font-size:28px;font-weight:500;line-height:1.1;">{n_urg}</div>'
-                f'</div>',
-                unsafe_allow_html=True)
-        with ko3:
-            st.markdown(
-                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
-                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">🚨 Emergency</div>'
-                f'<div style="font-size:28px;font-weight:500;line-height:1.1;">{n_emer}</div>'
-                f'</div>',
-                unsafe_allow_html=True)
-        if n_other > 0:
-            st.caption(f"⚠️ มี {n_other} เคสที่ op_type เป็นค่าอื่น "
-                       f"(re-upload schedule.xls เพื่ออัปเดต)")
-
-    # NOTE (thesis mode): ซ่อน KPI cost/patho ชั่วคราว — เปิดกลับโดย uncomment
-    # k9, k10, k11, k12 = st.columns(4)
-    # k9.metric("💰 ค่าหัตถการ", f"{s_all['total_treatment']:,} ฿")
-    # k10.metric("💵 รายได้รวม", f"{s_all['total_revenue']:,} ฿")
-    # k11.metric("🧬 ส่งชิ้นเนื้อ", f"{s_all['n_patho_sent']} ราย")
-    # k12.metric("🔬 ค่าชิ้นเนื้อ", f"{s_all['total_patho']:,} ฿")
-
-    # -- นอกเวลา สะสม --
-    st.markdown('<div class="section-title">🌙 เคสนอกเวลา (สะสม)</div>', unsafe_allow_html=True)
     df_range = get_cases()
     df_range = df_range[
         (df_range['op_date'] >= date_from) &
@@ -1531,10 +1589,12 @@ def _render_historical_analytics(date_from: str, date_to: str):
         a3.metric("ยกเลิก", len(aft_range[aft_range['status'] == 'cancelled']))
         # a4.metric("💰 รายได้", f"{int(aft_range['treatment_cost'].fillna(0).sum()):,} ฿")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # -- Export --
-    st.markdown('<div class="section-title">💾 Export ข้อมูล</div>', unsafe_allow_html=True)
+    # ════════════════════════════════════════════════════════════════
+    # 7️⃣  💾 Export ข้อมูล
+    # ════════════════════════════════════════════════════════════════
+    st.markdown('<div class="group-header" style="color:#546e7a;background:#eceff1;'
+                'border-left-color:#546e7a;">💾 Export ข้อมูล</div>',
+                unsafe_allow_html=True)
     st.caption("ดาวน์โหลดข้อมูลสำหรับผู้บริหารหรือวิทยานิพนธ์")
     col_e1, col_e2 = st.columns([1, 3])
     with col_e1:
