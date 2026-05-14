@@ -190,7 +190,12 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
         if procnote.upper() in ('NAN', 'NONE', ''):
             procnote = None
         estmtime = s.get('estmtime')
-        
+
+        # op_type: elective / urgent / emergency จาก HIS schedule (optype_var)
+        op_type = str(s.get('optype_var', '') or '').strip().lower()
+        if op_type in ('nan', 'none', ''):
+            op_type = 'elective'  # default
+
         pt_type = _classify_patient_type(an_val, estmtime, procnote)
         
         # Get intraop data
@@ -255,14 +260,14 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
                     UPDATE cases SET
                         name=?, an=?, diagnosis=?, surgeon_name=?,
                         division_code=?, case_category=?, patient_type=?,
-                        status=?, arrived_at=?, in_or_at=?, op_end_at=?,
+                        op_type=?, status=?, arrived_at=?, in_or_at=?, op_end_at=?,
                         discharged_at=?, actual_duration_min=?,
                         scrub_nurse=?, circ_nurse=?, wait_min=?, room_no=?,
                         procnote=?, requested_date=?
                     WHERE case_id=?
                 """, (
                     name, an_val, diag, surgeon, division, case_cat, pt_type,
-                    status, arrived_at, in_or_at, op_end_at, discharged_at,
+                    op_type, status, arrived_at, in_or_at, op_end_at, discharged_at,
                     actual_min, scrub, circ, wait_min, room_no, procnote, req_date,
                     exists[0]
                 ))
@@ -277,14 +282,14 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
                 conn.execute("""
                     INSERT INTO cases (op_date, name, hn, an, diagnosis, procedure_name,
                                       surgeon_name, division_code, case_category, patient_type,
-                                      status, arrived_at, in_or_at, op_end_at, discharged_at,
+                                      op_type, status, arrived_at, in_or_at, op_end_at, discharged_at,
                                       actual_duration_min, scrub_nurse, circ_nurse,
                                       wait_min, room_no, procnote, requested_date)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     op_date, name, hn, an_val, diag, proc,
                     surgeon, division, case_cat, pt_type,
-                    status, arrived_at, in_or_at, op_end_at, discharged_at,
+                    op_type, status, arrived_at, in_or_at, op_end_at, discharged_at,
                     actual_min, scrub, circ,
                     wait_min, room_no, procnote, req_date,
                 ))
