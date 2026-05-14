@@ -1,0 +1,192 @@
+{
+  "version": "v4",
+  "trained_at": "2026-05-14T15:52:38.962269",
+  "n_samples": 6734,
+  "n_train": 4040,
+  "n_val": 1347,
+  "n_test": 1347,
+  "n_features": 16,
+  "best_model": "Lasso (alpha=0.1)",
+  "cv_results": {
+    "Linear Regression": {
+      "r2_mean": 0.616,
+      "r2_std": 0.1154,
+      "r2_folds": [
+        0.4205,
+        0.7702,
+        0.6743,
+        0.6302,
+        0.5845
+      ],
+      "mae_mean": 9.71,
+      "mae_std": 0.4,
+      "mae_folds": [
+        10.15,
+        10.15,
+        9.36,
+        9.73,
+        9.17
+      ],
+      "within_10min_mean": 65.8,
+      "within_10min_std": 2.0
+    },
+    "Ridge (alpha=1)": {
+      "r2_mean": 0.616,
+      "r2_std": 0.1154,
+      "r2_folds": [
+        0.4205,
+        0.7702,
+        0.6743,
+        0.6303,
+        0.5845
+      ],
+      "mae_mean": 9.71,
+      "mae_std": 0.4,
+      "mae_folds": [
+        10.15,
+        10.15,
+        9.36,
+        9.73,
+        9.17
+      ],
+      "within_10min_mean": 65.8,
+      "within_10min_std": 2.0
+    },
+    "Ridge (alpha=10)": {
+      "r2_mean": 0.616,
+      "r2_std": 0.1154,
+      "r2_folds": [
+        0.4205,
+        0.7702,
+        0.6743,
+        0.6303,
+        0.5845
+      ],
+      "mae_mean": 9.71,
+      "mae_std": 0.4,
+      "mae_folds": [
+        10.15,
+        10.15,
+        9.36,
+        9.73,
+        9.17
+      ],
+      "within_10min_mean": 65.7,
+      "within_10min_std": 2.0
+    },
+    "Lasso (alpha=0.1)": {
+      "r2_mean": 0.6163,
+      "r2_std": 0.1155,
+      "r2_folds": [
+        0.4205,
+        0.7706,
+        0.6747,
+        0.6305,
+        0.5851
+      ],
+      "mae_mean": 9.7,
+      "mae_std": 0.4,
+      "mae_folds": [
+        10.14,
+        10.13,
+        9.35,
+        9.71,
+        9.16
+      ],
+      "within_10min_mean": 65.7,
+      "within_10min_std": 2.1
+    },
+    "Random Forest": {
+      "r2_mean": 0.569,
+      "r2_std": 0.0884,
+      "r2_folds": [
+        0.4215,
+        0.6632,
+        0.6034,
+        0.6379,
+        0.5192
+      ],
+      "mae_mean": 10.12,
+      "mae_std": 0.46,
+      "mae_folds": [
+        10.49,
+        10.82,
+        9.86,
+        9.85,
+        9.58
+      ],
+      "within_10min_mean": 63.9,
+      "within_10min_std": 1.7
+    },
+    "Gradient Boosting": {
+      "r2_mean": 0.589,
+      "r2_std": 0.1192,
+      "r2_folds": [
+        0.4295,
+        0.7581,
+        0.6626,
+        0.6113,
+        0.4838
+      ],
+      "mae_mean": 10.06,
+      "mae_std": 0.24,
+      "mae_folds": [
+        10.39,
+        10.3,
+        9.8,
+        9.98,
+        9.83
+      ],
+      "within_10min_mean": 64.3,
+      "within_10min_std": 1.5
+    },
+    "XGBoost": {
+      "r2_mean": 0.5733,
+      "r2_std": 0.111,
+      "r2_folds": [
+        0.4139,
+        0.7235,
+        0.6377,
+        0.6091,
+        0.4825
+      ],
+      "mae_mean": 10.27,
+      "mae_std": 0.33,
+      "mae_folds": [
+        10.67,
+        10.67,
+        10.0,
+        9.97,
+        10.02
+      ],
+      "within_10min_mean": 64.4,
+      "within_10min_std": 1.3
+    }
+  },
+  "test_results": {
+    "MAE": 9.82,
+    "RMSE": 15.56,
+    "R2": 0.7374,
+    "within_10min": 65.3,
+    "within_15min": 81.6
+  },
+  "overfit_gap_r2": 0.121,
+  "feature_cols": [
+    "proc_enc",
+    "surgeon_enc",
+    "division_enc",
+    "age",
+    "op_hour",
+    "day_of_week",
+    "month",
+    "timeslot_enc",
+    "optype_enc",
+    "surgeon_avg_duration",
+    "proc_avg_duration",
+    "surg_proc_avg",
+    "scrub_enc",
+    "circ_enc",
+    "wait_min",
+    "month_avg"
+  ]
+}
