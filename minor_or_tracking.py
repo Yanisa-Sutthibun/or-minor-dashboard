@@ -544,7 +544,8 @@ def _render_after_hours_card(row):
 
     # If already discharged (confirmed) — show green "done" card
     if status == 'discharged':
-        cost_d = int(row.get('treatment_cost') or 0)
+        # NOTE (thesis mode): ซ่อนค่าหัตถการ — เปิดกลับโดย uncomment cost_d + เพิ่มกลับใน pt-meta
+        # cost_d = int(row.get('treatment_cost') or 0)
         st.markdown(f"""<div class="case-card" style="background:#e8f5e9;border-left:5px solid #4caf50;">
 <div><span class="pill pill-dc">✅ ยืนยันแล้ว</span>
 <span class="pill pill-after">นอกเวลา</span></div>
@@ -553,7 +554,7 @@ def _render_after_hours_card(row):
 <span class="pt-hn">HN: {hn_d}</span>
 </div>{_aft_diag}
 <div class="pt-proc">{proc_d}</div>
-<div class="pt-meta">แพทย์: {surg_d} · ค่าหัตถการ: {cost_d:,} ฿</div>
+<div class="pt-meta">แพทย์: {surg_d}</div>
 </div>""", unsafe_allow_html=True)
         return
 
@@ -587,33 +588,35 @@ def _render_after_hours_card(row):
     # === ยืนยัน flow (expanded) ===
     if st.session_state.get(f'aft_confirming_{cid}'):
         st.markdown("---")
-        st.markdown("**💰 ยืนยันเคส — เลือกราคาค่าหัตถการ**")
+        # NOTE (thesis mode): ซ่อน UI เลือกราคา — เก็บโค้ดราคาไว้ใน comment block ด้านล่าง
+        # คงไว้แค่ "แพทย์ที่ทำ" + "ยืนยันบันทึก" — บันทึกค่าราคา = 0 ก่อน
+        st.markdown("**✅ ยืนยันเคสนอกเวลา**")
 
-        # Fuzzy price lookup
-        matches = _fuzzy_price_lookup(proc_d)
-        cost_val = 0
-
-        if len(matches) == 1:
-            m = matches[0]
-            st.markdown(
-                f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
-                f'border-radius:12px;font-size:12px;">match: {m["procedure_name"]}</span>',
-                unsafe_allow_html=True)
-            cost_val = int(m['new_price_thb'])
-        elif len(matches) > 1:
-            st.markdown(
-                f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
-                f'border-radius:12px;font-size:12px;">พบ {len(matches)} รายการ</span>',
-                unsafe_allow_html=True)
-            options_display = [
-                f"{r['procedure_name_th']} — {int(r['new_price_thb']):,} ฿"
-                for r in matches
-            ]
-            sel = st.selectbox("เลือกรายการ", options_display, key=f"aftpick_{cid}")
-            sel_idx = options_display.index(sel)
-            cost_val = int(matches[sel_idx]['new_price_thb'])
-        cost_val = st.number_input("ค่าหัตถการ (บาท)", min_value=0,
-                                    value=cost_val, step=100, key=f"aftcost_{cid}")
+        # ── [HIDDEN — thesis mode] Fuzzy price lookup ──
+        # matches = _fuzzy_price_lookup(proc_d)
+        # cost_val = 0
+        # if len(matches) == 1:
+        #     m = matches[0]
+        #     st.markdown(
+        #         f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
+        #         f'border-radius:12px;font-size:12px;">match: {m["procedure_name"]}</span>',
+        #         unsafe_allow_html=True)
+        #     cost_val = int(m['new_price_thb'])
+        # elif len(matches) > 1:
+        #     st.markdown(
+        #         f'<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;'
+        #         f'border-radius:12px;font-size:12px;">พบ {len(matches)} รายการ</span>',
+        #         unsafe_allow_html=True)
+        #     options_display = [
+        #         f"{r['procedure_name_th']} — {int(r['new_price_thb']):,} ฿"
+        #         for r in matches
+        #     ]
+        #     sel = st.selectbox("เลือกรายการ", options_display, key=f"aftpick_{cid}")
+        #     sel_idx = options_display.index(sel)
+        #     cost_val = int(matches[sel_idx]['new_price_thb'])
+        # cost_val = st.number_input("ค่าหัตถการ (บาท)", min_value=0,
+        #                             value=cost_val, step=100, key=f"aftcost_{cid}")
+        cost_val = 0  # default — thesis mode
 
         # แพทย์ที่ทำ (editable)
         aft_surg = st.text_input("แพทย์ที่ทำ", value=surg_d, key=f"aftsurg_{cid}")
@@ -1049,8 +1052,9 @@ def _render_actions(cid, status, row=None):
     elif status == 'post_op':
         dest_val = row.get('post_op_dest', 'transfer') if row is not None else 'transfer'
 
+        # NOTE (thesis mode): ซ่อน expander แก้ไขราคา/patho — เปิดกลับโดยลบ False and
         # แก้หัตถการ + ค่ารักษา (เฉพาะ transfer = ห้องรับส่ง)
-        if dest_val == 'transfer':
+        if False and dest_val == 'transfer':  # disabled for thesis mode
             with st.expander("💰 แก้ไขหัตถการ / ค่ารักษา", expanded=False):
                 cur_proc = (row['procedure_name'] or '').strip()
                 cur_cost = int(row.get('treatment_cost') or 0)

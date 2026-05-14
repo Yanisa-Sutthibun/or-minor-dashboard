@@ -1449,11 +1449,12 @@ def _render_historical_analytics(date_from: str, date_to: str):
     k7.metric("เคสนัดหมาย", s_all['n_set'])
     k8.metric("Walk-in", s_all['n_walkin'])
 
-    k9, k10, k11, k12 = st.columns(4)
-    k9.metric("💰 ค่าหัตถการ", f"{s_all['total_treatment']:,} ฿")
-    k10.metric("💵 รายได้รวม", f"{s_all['total_revenue']:,} ฿")
-    k11.metric("🧬 ส่งชิ้นเนื้อ", f"{s_all['n_patho_sent']} ราย")
-    k12.metric("🔬 ค่าชิ้นเนื้อ", f"{s_all['total_patho']:,} ฿")
+    # NOTE (thesis mode): ซ่อน KPI cost/patho ชั่วคราว — เปิดกลับโดย uncomment
+    # k9, k10, k11, k12 = st.columns(4)
+    # k9.metric("💰 ค่าหัตถการ", f"{s_all['total_treatment']:,} ฿")
+    # k10.metric("💵 รายได้รวม", f"{s_all['total_revenue']:,} ฿")
+    # k11.metric("🧬 ส่งชิ้นเนื้อ", f"{s_all['n_patho_sent']} ราย")
+    # k12.metric("🔬 ค่าชิ้นเนื้อ", f"{s_all['total_patho']:,} ฿")
 
     # -- นอกเวลา สะสม --
     st.markdown('<div class="section-title">🌙 เคสนอกเวลา (สะสม)</div>', unsafe_allow_html=True)
@@ -1572,16 +1573,21 @@ def page_admin():
     """, unsafe_allow_html=True)
 
     # ===== TABS =====
-    tab_today, tab_cost, tab_history, tab_ai = st.tabs([
+    # NOTE (thesis mode): ซ่อนแท็บ "💰 ใส่ราคารายวัน" ชั่วคราว
+    # เปิดกลับเมื่อต้องการ → uncomment 4 บรรทัดล่าง + กลับมา 4 tabs
+    # tab_today, tab_cost, tab_history, tab_ai = st.tabs([
+    #     "📋 ภาพรวมวันนี้",
+    #     "💰 ใส่ราคารายวัน",
+    #     "📈 สถิติย้อนหลัง",
+    #     "🤖 AI Prediction (งานวิจัย)",
+    # ])
+    # with tab_cost:
+    #     _render_cost_entry_tab()
+    tab_today, tab_history, tab_ai = st.tabs([
         "📋 ภาพรวมวันนี้",
-        "💰 ใส่ราคารายวัน",
         "📈 สถิติย้อนหลัง",
         "🤖 AI Prediction (งานวิจัย)",
     ])
-
-    # -- TAB 2: Quick Cost Entry (วันที่ + ตารางกรอกราคา) --
-    with tab_cost:
-        _render_cost_entry_tab()
 
     # -- TAB 1: Today overview --
     with tab_today:
