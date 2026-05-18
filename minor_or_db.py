@@ -58,6 +58,34 @@ _PROC_RULES = [
     # Q-Switch ND:YAG laser
     (re.compile(r'\b(?:qs|q[\s\-]*switch|nd[\s:\-]*yag)\b', re.I),
         'Q-Switch ND:YAG'),
+
+    # CO2 Laser (รวม CO2, CO2 Laser, CO2 laser ตัวเล็ก/ใหญ่)
+    (re.compile(r'\bco\s*2\b', re.I), 'CO2 Laser'),
+
+    # Change VAC dressing (รวม Change VAC, Change Vac, Change vac dressing)
+    (re.compile(r'\bchange\s*vac\b', re.I), 'Change VAC dressing'),
+
+    # Debridement (รวม DB ตัวย่อ + Debride/Debridement/Debriding)
+    (re.compile(r'\b(?:debrid(?:e|ement|ing|ed)?|debride?ment)\b', re.I),
+        'Debridement'),
+    # "DB" prefix — รวม "DB", "DB foot", "DB pressure sore", "DB เปิด..."
+    (re.compile(r'^\s*db\b', re.I), 'Debridement'),
+
+    # Arch bar (รวม removal/insertion/replace)
+    (re.compile(r'\barch\s*bar\b', re.I), 'Arch bar'),
+
+    # Stitch off / Suture removal
+    (re.compile(r'\b(?:stitch|suture)\s*(?:off|out|removal|remove)\b', re.I),
+        'Stitch off'),
+    (re.compile(r'\boff\s*(?:stitch|suture)\b', re.I), 'Stitch off'),
+
+    # Biopsy (general)
+    (re.compile(r'^\s*biopsy\s*$', re.I), 'Biopsy'),
+
+    # Correction upper eyelid / Ptosis
+    (re.compile(r'\b(?:correction|repair)\s*(?:upper|lower)?\s*eyelid\b', re.I),
+        'Correction eyelid'),
+    (re.compile(r'\bptosis\b', re.I), 'Correction eyelid'),
 ]
 
 
@@ -71,18 +99,58 @@ def _strip_modifiers(name: str) -> str:
     return s
 
 
+# Canonical names สำหรับ fuzzy fallback (SequenceMatcher)
+_CANONICAL_NAMES = [
+    'Off catheter (PERM/TCC/IJV)', 'Nail extraction', 'ESWL', 'I&D',
+    'Excision', 'EC', 'Morpheus', 'Q-Switch ND:YAG',
+    'CO2 Laser', 'Change VAC dressing', 'Debridement',
+    'Arch bar', 'Stitch off', 'Biopsy', 'Correction eyelid',
+]
+
+
+def _fuzzy_match_canonical(name: str, threshold: float = 0.82):
+    """SequenceMatcher fallback — จับ typo เช่น Debreidement → Debridement
+    คืนค่า canonical ที่คล้ายที่สุด ถ้า ratio ≥ threshold มิฉะนั้น None
+    """
+    from difflib import SequenceMatcher
+    best_score = 0.0
+    best_canon = None
+    n_lower = name.lower()
+    for canon in _CANONICAL_NAMES:
+        # เทียบทั้งคำเต็ม + first word (กันชื่อยาว)
+        r1 = SequenceMatcher(None, n_lower, canon.lower()).ratio()
+        c_first = canon.split()[0].lower()
+        n_first = n_lower.split()[0] if n_lower else ''
+        r2 = (SequenceMatcher(None, n_first, c_first).ratio()
+              if n_first and c_first else 0)
+        score = max(r1, r2)
+        if score > best_score:
+            best_score = score
+            best_canon = canon
+    return best_canon if best_score >= threshold else None
+
+
 def _normalize_procedure_name(name) -> str:
-    """แปลงชื่อหัตถการดิบ → canonical group ตาม rule + cleanup."""
+    """แปลงชื่อหัตถการดิบ → canonical group ตาม rule + cleanup.
+
+    Layer 1: Regex rules (เร็วสุด — pattern จับ keyword)
+    Layer 2: SequenceMatcher fuzzy (จับ typo — เช่น Debreidement → Debridement)
+    Layer 3: Cleanup + title case
+    """
     if name is None:
         return 'UNKNOWN'
     s = str(name).strip()
     if not s or s.lower() in ('nan', 'none', '-'):
         return 'UNKNOWN'
-    # Rule-based ก่อน
+    # Layer 1: Rule-based
     for pat, canonical in _PROC_RULES:
         if pat.search(s):
             return canonical
-    # ตัด side / เลขท้าย แล้ว Title Case
+    # Layer 2: SequenceMatcher fuzzy (สำหรับ typo)
+    fuzzy = _fuzzy_match_canonical(s)
+    if fuzzy:
+        return fuzzy
+    # Layer 3: ตัด side / เลขท้าย แล้ว Title Case
     cleaned = _strip_modifiers(s)
     if not cleaned:
         return s
@@ -2015,10 +2083,22 @@ def get_wait_stats(date_from: str = None, date_to: str = None) -> dict:
 # ---------------------------------------------------------------------------
 # Handover statistics  (เคสที่ยังไม่ discharge ณ 15:30 น.)
 # ---------------------------------------------------------------------------
-def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
-    """สถิติรับเวร — เคสที่ discharged หลัง 15:30 หรือไม่ได้ discharge ในวันนั้น."""
+def get_turnover_stats(date_from: str = None, date_to: str = None,
+                        min_min: int = 1, max_min: int = 90) -> dict:
+    """🔄 Turnover Time Analytics — ช่วงเวลาระหว่างเคสในห้องเดียวกัน
+
+    Turnover = (เคสถัดไป.in_or_at) - (เคสก่อนหน้า.op_end_at)
+    เรียงตาม op_date + room_no + in_or_at — เคสที่อยู่ในห้องเดียวกันวันเดียวกัน
+
+    Args:
+        min_min, max_min: ช่วง turnover ที่ valid (กรอง outlier เช่น เคสคู่ขนาน หรือ pause นาน)
+
+    Returns dict: avg, median, p90, max, n, daily DF, top5 DF, heatmap DF
+    """
+    import pandas as pd
     conn = get_conn()
-    where_parts = ["patient_type != 'นอกเวลา'"]
+    where_parts = ["status IN ('post_op','discharged','done')",
+                   "in_or_at IS NOT NULL", "op_end_at IS NOT NULL"]
     params = []
     if date_from:
         where_parts.append("op_date >= ?"); params.append(date_from)
@@ -2026,11 +2106,255 @@ def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
         where_parts.append("op_date <= ?"); params.append(date_to)
     where_sql = " AND ".join(where_parts)
 
-    # เคสรับเวร = discharged หลัง 15:30 หรือ status ไม่ใช่ discharged/cancelled
+    df = pd.read_sql_query(
+        f"SELECT case_id, op_date, room_no, procedure_name, "
+        f"in_or_at, op_end_at FROM cases WHERE {where_sql} "
+        f"ORDER BY op_date, room_no, in_or_at",
+        conn, params=params)
+    conn.close()
+
+    empty = {
+        'avg': 0, 'median': 0, 'p90': 0, 'max': 0, 'n': 0,
+        'daily': pd.DataFrame(columns=['op_date', 'avg_turnover']),
+        'top5': pd.DataFrame(columns=['op_date', 'prev_proc', 'next_proc', 'turnover_min']),
+        'heatmap': pd.DataFrame(columns=['dow', 'hour', 'avg_turnover']),
+        'raw': pd.DataFrame(columns=['op_date', 'room_no', 'turnover_min']),
+    }
+    if df.empty:
+        return empty
+
+    df['_in_dt'] = pd.to_datetime(df['in_or_at'], errors='coerce')
+    df['_end_dt'] = pd.to_datetime(df['op_end_at'], errors='coerce')
+    df = df.dropna(subset=['_in_dt', '_end_dt'])
+
+    turnovers = []
+    for (op_date, room_no), grp in df.groupby(['op_date', 'room_no']):
+        grp = grp.sort_values('_in_dt')
+        prev_end, prev_proc = None, None
+        for _, r in grp.iterrows():
+            if prev_end is not None:
+                tt_min = (r['_in_dt'] - prev_end).total_seconds() / 60
+                if min_min <= tt_min <= max_min:
+                    turnovers.append({
+                        'op_date': op_date,
+                        'room_no': room_no,
+                        'turnover_min': round(tt_min, 1),
+                        'prev_proc': prev_proc or '-',
+                        'next_proc': r['procedure_name'] or '-',
+                        'dow': int(r['_in_dt'].dayofweek),
+                        'hour': int(r['_in_dt'].hour),
+                    })
+            prev_end = r['_end_dt']
+            prev_proc = r['procedure_name']
+
+    if not turnovers:
+        return empty
+
+    tdf = pd.DataFrame(turnovers)
+    daily = tdf.groupby('op_date')['turnover_min'].mean().reset_index()
+    daily.columns = ['op_date', 'avg_turnover']
+    daily['avg_turnover'] = daily['avg_turnover'].round(1)
+
+    top5 = tdf.nlargest(5, 'turnover_min')[
+        ['op_date', 'prev_proc', 'next_proc', 'turnover_min']].copy()
+
+    # Heatmap: dow (จ-ศ = 0-4) × hour (8-17)
+    heat = tdf[(tdf['dow'].between(0, 4)) & (tdf['hour'].between(8, 17))].copy()
+    heatmap = (heat.groupby(['dow', 'hour'])['turnover_min']
+                   .mean().round(1).reset_index())
+    heatmap.columns = ['dow', 'hour', 'avg_turnover']
+
+    return {
+        'avg': round(float(tdf['turnover_min'].mean()), 1),
+        'median': round(float(tdf['turnover_min'].median()), 1),
+        'p90': round(float(tdf['turnover_min'].quantile(0.9)), 1),
+        'max': round(float(tdf['turnover_min'].max()), 1),
+        'n': len(tdf),
+        'daily': daily,
+        'top5': top5,
+        'heatmap': heatmap,
+        'raw': tdf[['op_date', 'room_no', 'turnover_min']].copy(),
+    }
+
+
+def get_on_time_start_stats(date_from: str = None, date_to: str = None,
+                            target_hour: int = 9, target_min: int = 0,
+                            tolerance_min: int = 30) -> dict:
+    """🎯 On-Time First Case Start Rate
+
+    เปรียบเทียบ in_or_at เคสแรกของแต่ละวัน (จ-ศ, ไม่นับนอกเวลา)
+    กับเวลามาตรฐาน (default 09:00 น.) — ยอมเกินได้ tolerance_min นาที
+
+    Returns dict: rate (%), n_on_time, n_total, daily DF, late_top5 DF
+    """
+    import pandas as pd
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """SELECT op_date, room_no, in_or_at, procedure_name, surgeon_name,
+                  patient_type
+           FROM cases
+           WHERE status IN ('post_op','discharged','done')
+             AND in_or_at IS NOT NULL
+             AND (patient_type IS NULL OR patient_type != 'นอกเวลา')
+             AND (? IS NULL OR op_date >= ?)
+             AND (? IS NULL OR op_date <= ?)
+           ORDER BY op_date, room_no, in_or_at""",
+        conn, params=(date_from, date_from, date_to, date_to))
+    conn.close()
+
+    empty = {
+        'rate': 0, 'n_on_time': 0, 'n_total': 0,
+        'target_str': f"{target_hour:02d}:{target_min:02d}",
+        'tolerance_min': tolerance_min,
+        'daily': pd.DataFrame(columns=['op_date', 'room_no', 'in_or_at',
+                                       'delay_min', 'on_time']),
+        'late_top5': pd.DataFrame(),
+    }
+    if df.empty:
+        return empty
+
+    # Filter Mon-Fri
+    df['_dt'] = pd.to_datetime(df['op_date'])
+    df = df[df['_dt'].dt.dayofweek.between(0, 4)]
+    if df.empty:
+        return empty
+
+    df['_in_dt'] = pd.to_datetime(df['in_or_at'], errors='coerce')
+    df = df.dropna(subset=['_in_dt'])
+    if df.empty:
+        return empty
+
+    # หาเคสแรกของแต่ละ (op_date, room_no)
+    df_first = df.sort_values('_in_dt').groupby(
+        ['op_date', 'room_no'], as_index=False).first()
+
+    # คำนวณ delay (นาที) จาก 09:00 น.
+    df_first['_target'] = (df_first['_in_dt'].dt.normalize() +
+                           pd.Timedelta(hours=target_hour, minutes=target_min))
+    df_first['delay_min'] = (
+        (df_first['_in_dt'] - df_first['_target'])
+        .dt.total_seconds() / 60).round(1)
+    df_first['on_time'] = df_first['delay_min'] <= tolerance_min
+
+    daily = df_first[['op_date', 'room_no', 'in_or_at', 'procedure_name',
+                      'surgeon_name', 'delay_min', 'on_time']].copy()
+
+    # Top 5 ช้าสุด
+    late_top5 = daily[daily['delay_min'] > tolerance_min].nlargest(
+        5, 'delay_min')[['op_date', 'room_no', 'in_or_at',
+                         'procedure_name', 'surgeon_name', 'delay_min']]
+
+    n_total = len(daily)
+    n_on = int(daily['on_time'].sum())
+    rate = round(n_on / max(n_total, 1) * 100, 1)
+
+    return {
+        'rate': rate,
+        'n_on_time': n_on,
+        'n_total': n_total,
+        'target_str': f"{target_hour:02d}:{target_min:02d}",
+        'tolerance_min': tolerance_min,
+        'daily': daily,
+        'late_top5': late_top5,
+    }
+
+
+def get_nurse_skill_map(date_from: str = None, date_to: str = None,
+                        top_n_procedures: int = 10) -> dict:
+    """👯 Nurse Skill Map — พยาบาล × หัตถการ = จำนวนครั้ง
+
+    แยก scrub และ circulate เป็น 2 ตาราง
+    ใช้ _normalize_procedure_name เพื่อรวม fuzzy match
+
+    Returns dict: scrub_df, circ_df (รวม normalize แล้ว), top_procs list
+    """
+    import pandas as pd
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """SELECT scrub_nurse, circ_nurse, procedure_name, op_date
+           FROM cases
+           WHERE status IN ('post_op','discharged','done')
+             AND procedure_name IS NOT NULL AND procedure_name != ''
+             AND (? IS NULL OR op_date >= ?)
+             AND (? IS NULL OR op_date <= ?)""",
+        conn, params=(date_from, date_from, date_to, date_to))
+    conn.close()
+
+    empty = {
+        'scrub_df': pd.DataFrame(),
+        'circ_df': pd.DataFrame(),
+        'top_procs': [],
+    }
+    if df.empty:
+        return empty
+
+    # Normalize procedure names
+    df['proc'] = df['procedure_name'].apply(_normalize_procedure_name)
+    # หา top N procedures
+    top_procs = (df['proc'].value_counts().head(top_n_procedures)
+                 .index.tolist())
+
+    def _pivot(role_col: str) -> pd.DataFrame:
+        sub = df[df[role_col].notna() & (df[role_col] != '')].copy()
+        if sub.empty:
+            return pd.DataFrame()
+        # Normalize nurse name (strip titles)
+        sub['nurse'] = sub[role_col].astype(str).str.strip()
+        # Filter only top procedures
+        sub = sub[sub['proc'].isin(top_procs)]
+        if sub.empty:
+            return pd.DataFrame()
+        pivot = (sub.groupby(['nurse', 'proc'])
+                 .size().unstack(fill_value=0))
+        # เรียง column ตาม top_procs
+        for p in top_procs:
+            if p not in pivot.columns:
+                pivot[p] = 0
+        pivot = pivot[top_procs]
+        # เพิ่มคอลัมน์ total
+        pivot['รวม'] = pivot.sum(axis=1)
+        pivot = pivot.sort_values('รวม', ascending=False)
+        return pivot
+
+    return {
+        'scrub_df': _pivot('scrub_nurse'),
+        'circ_df': _pivot('circ_nurse'),
+        'top_procs': top_procs,
+    }
+
+
+def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
+    """สถิติรับเวร — เคสที่ผ่าตัดเสร็จหลัง 15:30 น. เฉพาะวันธรรมดา (จ.-ศ.)
+
+    - ไม่นับเคสนอกเวลา (เคสนอกเวลา = คนละหมวด)
+    - ไม่นับวันเสาร์-อาทิตย์ (ราชการไม่ได้ทำงาน)
+    - คำนวณ overtime_hours = ชั่วโมงเลย 15:30 น.
+    """
+    conn = get_conn()
+    where_parts = [
+        "patient_type != 'นอกเวลา'",
+        # SQLite strftime('%w', d): Sun=0, Mon=1, ..., Sat=6
+        "CAST(strftime('%w', op_date) AS INTEGER) BETWEEN 1 AND 5"
+    ]
+    params = []
+    if date_from:
+        where_parts.append("op_date >= ?"); params.append(date_from)
+    if date_to:
+        where_parts.append("op_date <= ?"); params.append(date_to)
+    where_sql = " AND ".join(where_parts)
+
+    # Handover cases + overtime hours (เลย 15:30 = 930 นาที)
     handover_cases = pd.read_sql_query(f"""
         SELECT case_id, op_date, name, hn, procedure_name, surgeon_name,
                division_code, room_no, status,
-               arrived_at, in_or_at, op_end_at, discharged_at
+               arrived_at, in_or_at, op_end_at, discharged_at,
+               CASE
+                 WHEN discharged_at IS NOT NULL THEN
+                   ROUND((CAST(SUBSTR(discharged_at, 12, 2) AS INTEGER) * 60
+                          + CAST(SUBSTR(discharged_at, 15, 2) AS INTEGER) - 930)
+                         / 60.0, 2)
+                 ELSE NULL
+               END AS overtime_hours
         FROM cases
         WHERE {where_sql}
           AND (
@@ -2042,10 +2366,25 @@ def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
     if not handover_cases.empty and 'division_code' in handover_cases.columns:
         handover_cases['division_name'] = handover_cases['division_code'].apply(div_name)
 
-    # สรุปรายวัน
+    # สรุปรายเดือน — เคสกี่เคส + รวม overtime กี่ชั่วโมง
+    monthly = pd.read_sql_query(f"""
+        SELECT strftime('%Y-%m', op_date) AS month,
+               COUNT(*) AS n_cases,
+               ROUND(SUM(
+                   (CAST(SUBSTR(discharged_at, 12, 2) AS INTEGER) * 60
+                    + CAST(SUBSTR(discharged_at, 15, 2) AS INTEGER) - 930) / 60.0
+               ), 1) AS overtime_hours
+        FROM cases
+        WHERE {where_sql}
+          AND discharged_at IS NOT NULL
+          AND SUBSTR(discharged_at, 12, 5) > '15:30'
+        GROUP BY month
+        ORDER BY month
+    """, conn, params=params)
+
+    # สรุปรายวัน (เก็บไว้สำหรับ chart)
     daily_handover = pd.read_sql_query(f"""
-        SELECT op_date,
-               COUNT(*) AS n_handover
+        SELECT op_date, COUNT(*) AS n_handover
         FROM cases
         WHERE {where_sql}
           AND (
@@ -2055,12 +2394,11 @@ def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
         GROUP BY op_date ORDER BY op_date
     """, conn, params=params)
 
-    # จำนวนเคสทั้งหมดในช่วง (ไม่รวม cancelled)
+    # Total weekday cases (ไม่รวม cancelled)
     total_row = pd.read_sql_query(f"""
         SELECT COUNT(*) AS total
         FROM cases WHERE {where_sql} AND status != 'cancelled'
     """, conn, params=params)
-
 
     conn.close()
     total = int(total_row.iloc[0]['total']) if not total_row.empty else 0
@@ -2068,6 +2406,7 @@ def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
     return {
         'handover_cases': handover_cases,
         'daily_handover': daily_handover,
+        'monthly': monthly,
         'n_handover': n_handover,
         'total': total,
         'pct': round(n_handover / total * 100, 1) if total > 0 else 0,

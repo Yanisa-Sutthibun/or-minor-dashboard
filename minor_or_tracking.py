@@ -87,7 +87,7 @@ OR_NURSE_LIST = [
     'ญาณิศา สุทธิบูรณ์',
     'พิมพ์ชนก ตั๊นประเสริฐ',
     'ศตพร แย้มชื่น',
-    'เพชรมงกุฏ แขมดำ',
+    'เพชรมงกุฎ แขมคำ',  # แก้ tipo: เพชรมงกุฏ แขมดำ → เพชรมงกุฎ แขมคำ
     'พรสุภา ญาณะวัฒน์',
 ]
 
@@ -206,6 +206,19 @@ def page_tracking():
         unsafe_allow_html=True,
     )
 
+    # ---- 🎬 Executive Demo toggle (สำหรับ demo ผู้บริหาร — ไม่แตะ DB) ----
+    demo_l, demo_r = st.columns([4, 2])
+    with demo_l:
+        st.markdown(
+            '<div style="font-size:13px;color:#777;padding-top:6px;">'
+            '💡 <b>Executive Demo</b> — เปิดเพื่อโชว์ Live Queue + ETA '
+            'พร้อมข้อมูลตัวอย่าง (ไม่บันทึก DB)</div>',
+            unsafe_allow_html=True)
+    with demo_r:
+        exec_demo = st.toggle('🎬 Demo สำหรับผู้บริหาร',
+                              key='exec_demo_mode',
+                              value=st.session_state.get('exec_demo_mode', False))
+
     # ---- Date + Upload + Refresh ----
     col_d, col_u, col_r = st.columns([4, 4, 1])
     with col_d:
@@ -286,8 +299,487 @@ def _assign_waiting_room(procedure_name: str) -> str:
     return 'room45'
 
 
+# ════════════════════════════════════════════════════════════════════
+# 🎬 EXECUTIVE DEMO — Full Flow (มีผู้ป่วย → discharge)
+# ════════════════════════════════════════════════════════════════════
+_DEMO_PATIENTS_FULL = [
+    {'cid': 9001, 'status': 'scheduled',
+     'name': 'น.ส.ปาริชาติ ม.', 'hn': '660044556', 'age': 42,
+     'proc': 'Excision skin lesion at scalp', 'dx': 'Skin Lesion',
+     'surgeon': 'แพทย์หญิงดารัตน์', 'estimated_time': '14:30', 'ai_pred': 25,
+     'note': 'เคส elective นัดล่วงหน้า · AI ทำนาย 25 น.'},
+    {'cid': 9004, 'status': 'in_or', 'room': 1,
+     'name': 'นายภัทรเดช ว.', 'hn': '690009822', 'age': 36,
+     'proc': 'Morpheus (Aging Face)', 'dx': 'Aging Face',
+     'surgeon': 'พ.ต.อ.เฉลิมเกียรติ', 'in_or_min': 18, 'ai_pred': 30,
+     'note': '🤖 AI: ใช้ห้อง 30 น. · ผ่าไป 18 น. · เหลือ ~12 น.'},
+    {'cid': 9005, 'status': 'post_op__recovery',
+     'name': 'นางสุปรานี เ.', 'hn': '590018522', 'age': 59,
+     'proc': 'I and D abscess at back', 'dx': 'Abscess',
+     'surgeon': 'แพทย์หญิงวริศฐา', 'duration_min': 16, 'recovery_min': 10,
+     'note': 'ผ่าจริง 16 น. · พักฟื้น 10 น. · เตรียม discharge'},
+    {'cid': 9006, 'status': 'discharged',
+     'name': 'นายพลเทพ เ.', 'hn': '531479595', 'age': 82,
+     'proc': 'Correction upper eyelid', 'dx': 'Ptosis upper eyelid',
+     'surgeon': 'พ.ต.อ.เฉลิมเกียรติ', 'duration_min': 50, 'discharged_at': '13:25',
+     'note': 'ใช้เวลาผ่า 50 น. · กลับบ้าน 13:25'},
+]
+
+
+def _render_demo_banner():
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#fff8e1,#ffe082);'
+        'border-radius:8px;padding:10px 16px;margin-bottom:8px;'
+        'border-left:5px solid #f57c00;">'
+        '<span style="font-size:14px;font-weight:700;color:#f57c00;">'
+        '🎬 EXECUTIVE DEMO</span> '
+        '<span style="font-size:13px;color:#bf360c;">ข้อมูลตัวอย่าง — ไม่บันทึก DB</span></div>',
+        unsafe_allow_html=True)
+
+
+def _render_demo_stats_bar():
+    """แถบ KPI demo: 1 sched · 3 arrived · 1 in_or · 1 recovery · 1 dc"""
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.markdown('<div class="metric-box"><div class="metric-num">7</div>'
+                '<div class="metric-lbl">ทั้งหมด</div></div>', unsafe_allow_html=True)
+    c2.markdown('<div class="metric-box"><div class="metric-num" style="color:#f9a825">3</div>'
+                '<div class="metric-lbl">รอผ่า</div></div>', unsafe_allow_html=True)
+    c3.markdown('<div class="metric-box"><div class="metric-num" style="color:#1976d2">1</div>'
+                '<div class="metric-lbl">กำลังผ่า</div></div>', unsafe_allow_html=True)
+    c4.markdown('<div class="metric-box"><div class="metric-num" style="color:#388e3c">2</div>'
+                '<div class="metric-lbl">เสร็จ</div></div>', unsafe_allow_html=True)
+    c5.markdown('<div class="metric-box"><div class="metric-num" style="color:#e53935">0</div>'
+                '<div class="metric-lbl">ยกเลิก</div></div>', unsafe_allow_html=True)
+    st.markdown("")
+
+
+def _render_executive_demo_receive():
+    """🎬 Demo: รับผู้ป่วย — แสดง 1 เคส scheduled"""
+    _render_demo_banner()
+    _render_demo_stats_bar()
+    with st.expander("💡 หน้านี้คืออะไร?", expanded=False):
+        st.markdown("""
+**🧑 รับผู้ป่วย** = จุดเริ่มต้น flow ในห้องผ่าตัดเล็ก
+
+- พยาบาลเช็คอินผู้ป่วยที่มาตามนัด หรือ Walk-in
+- ระบบเก็บข้อมูล: HN, ชื่อ, อายุ, หัตถการ, แพทย์, เวลานัด
+- **🤖 AI ทำนายเวลาผ่าตัด** จะแสดงเลยตั้งแต่ขั้นนี้
+- พอกดปุ่ม "รับผู้ป่วย" → เคสเลื่อนไปแท็บ "⏳ รอผ่าตัด"
+""")
+    p = next(x for x in _DEMO_PATIENTS_FULL if x['status'] == 'scheduled')
+    st.markdown(f"""
+    <div class="case-card" style="background:#f3e5f5;border-left:5px solid #9c27b0;">
+        <div><span class="pill" style="background:#9c27b0;color:white;">🆕 รอตรวจรับ</span>
+        <span class="pill" style="background:#e1bee7;color:#6a1b9a;">นัดล่วงหน้า</span></div>
+        <div style="margin-top:6px;">
+            <span class="pt-name">{p['name']}</span>
+            <span class="pt-hn">HN: {p['hn']} · อายุ {p['age']}</span>
+        </div>
+        <div style="color:#555;font-size:12px;margin-top:2px;">Dx: {p['dx']}</div>
+        <div class="pt-proc">{p['proc']}</div>
+        <div class="pt-meta">แพทย์: {p['surgeon']} · นัด {p['estimated_time']} น. · 🤖 AI {p['ai_pred']} น.</div>
+        <div style="margin-top:8px;padding:6px 10px;background:#fce4ec;border-radius:4px;
+                    font-size:11px;color:#6a1b9a;font-style:italic;">💡 {p['note']}</div>
+    </div>""", unsafe_allow_html=True)
+    st.button('🧑 รับผู้ป่วย (Demo)', key='demo_recv_btn',
+              use_container_width=True, disabled=True,
+              help='ปุ่มถูก disable ใน demo mode')
+
+
+def _render_executive_demo_or():
+    """🎬 Demo: ห้องผ่าตัด — แสดง 1 เคสกำลังผ่า + AI progress bar"""
+    _render_demo_banner()
+    _render_demo_stats_bar()
+    with st.expander("💡 หน้านี้คืออะไร?", expanded=False):
+        st.markdown("""
+**🔪 ห้องผ่าตัด** = เคสที่กำลังอยู่ในห้องผ่าตัด real-time
+
+- เห็นชื่อ + หัตถการ + แพทย์ที่กำลังผ่า
+- **🤖 AI progress bar** = บอกความคืบหน้า เทียบกับเวลาที่ AI ทำนาย
+  - 🔵 น้อยกว่า 90% → ปกติ ตรงเวลา
+  - 🟠 90-110% → ใกล้เสร็จแล้ว
+  - 🔴 เกิน 110% → นานกว่าที่ทำนาย ควรตรวจสอบ
+- พอผ่าเสร็จ → กดปุ่ม "ผ่าเสร็จ" → เคสเลื่อนไป "🛏️ ห้องพักฟื้น"
+""")
+    p = next(x for x in _DEMO_PATIENTS_FULL if x['status'] == 'in_or')
+    pct = round(p['in_or_min'] / p['ai_pred'] * 100)
+    bar_w = min(pct, 100)
+    bar_color = '#1976d2' if pct < 90 else '#e65100' if pct < 110 else '#c62828'
+    st.markdown(f"""
+    <div class="case-card" style="background:#e3f2fd;border-left:5px solid #1976d2;">
+        <div><span class="pill" style="background:#1976d2;color:white;">🔪 กำลังผ่าตัด · ห้อง {p['room']}</span></div>
+        <div style="margin-top:6px;">
+            <span class="pt-name">{p['name']}</span>
+            <span class="pt-hn">HN: {p['hn']} · อายุ {p['age']}</span>
+        </div>
+        <div style="color:#555;font-size:12px;margin-top:2px;">Dx: {p['dx']}</div>
+        <div class="pt-proc">{p['proc']}</div>
+        <div class="pt-meta">แพทย์: {p['surgeon']}</div>
+        <div style="margin-top:8px;padding:8px 12px;background:#e3f2fd;border-radius:6px;">
+            <div style="font-size:12px;color:#1565c0;margin-bottom:4px;">
+                🤖 AI ทำนายเวลาใช้ห้อง: ~{p['ai_pred']} นาที · ใช้ไป <b>{p['in_or_min']}</b> น.
+            </div>
+            <div style="background:#bbdefb;height:6px;border-radius:3px;overflow:hidden;">
+                <div style="background:{bar_color};height:100%;width:{bar_w}%;"></div>
+            </div>
+            <div style="font-size:11px;color:#1565c0;margin-top:4px;text-align:right;">{pct}% · เหลือ ~{p['ai_pred']-p['in_or_min']} น.</div>
+        </div>
+        <div style="margin-top:6px;padding:6px 10px;background:#e3f2fd;border-radius:4px;
+                    font-size:11px;color:#1565c0;font-style:italic;">💡 {p['note']}</div>
+    </div>""", unsafe_allow_html=True)
+
+
+def _render_executive_demo_recovery():
+    """🎬 Demo: ห้องพักฟื้น"""
+    _render_demo_banner()
+    _render_demo_stats_bar()
+    with st.expander("💡 หน้านี้คืออะไร?", expanded=False):
+        st.markdown("""
+**🛏️ ห้องพักฟื้น** = เคสที่ผ่าตัดเสร็จแล้ว กำลังพักฟื้นก่อนกลับบ้าน
+
+- ระยะเวลาพักฟื้นทั่วไป **10-30 นาที**
+- พยาบาลสังเกตอาการ — สัญญาณชีพ, อาการแพ้ยา, แผล
+- เมื่อพร้อม → กดปุ่ม **"ส่งห้องรับส่ง"** หรือ **"Discharge"** ทันที
+- ข้อมูลที่บันทึก: เวลาผ่าตัดจริง, เวลาพักฟื้น
+""")
+    p = next(x for x in _DEMO_PATIENTS_FULL if x['status'] == 'post_op__recovery')
+    st.markdown(f"""
+    <div class="case-card" style="background:#fff8e1;border-left:5px solid #f57c00;">
+        <div><span class="pill" style="background:#f57c00;color:white;">🛏️ พักฟื้น</span>
+        <span class="pill" style="background:#ffe082;color:#bf360c;">{p['recovery_min']} นาที</span></div>
+        <div style="margin-top:6px;">
+            <span class="pt-name">{p['name']}</span>
+            <span class="pt-hn">HN: {p['hn']} · อายุ {p['age']}</span>
+        </div>
+        <div style="color:#555;font-size:12px;margin-top:2px;">Dx: {p['dx']}</div>
+        <div class="pt-proc">{p['proc']}</div>
+        <div class="pt-meta">แพทย์: {p['surgeon']} · ผ่าจริง {p['duration_min']} นาที</div>
+        <div style="margin-top:8px;padding:6px 10px;background:#ffecb3;border-radius:4px;
+                    font-size:11px;color:#bf360c;font-style:italic;">💡 {p['note']}</div>
+    </div>""", unsafe_allow_html=True)
+    cdc1, cdc2 = st.columns(2)
+    cdc1.button('🛗 ส่งห้องรับส่ง (Demo)', key='demo_to_dc', disabled=True,
+                use_container_width=True)
+    cdc2.button('🏠 Discharge (Demo)', key='demo_dc_direct', disabled=True,
+                use_container_width=True)
+
+
+def _render_executive_demo_discharge():
+    """🎬 Demo: ห้องรับส่ง / Discharged"""
+    _render_demo_banner()
+    _render_demo_stats_bar()
+    with st.expander("💡 หน้านี้คืออะไร?", expanded=False):
+        st.markdown("""
+**🛗 ห้องรับส่ง / Discharge** = ขั้นสุดท้าย — ผู้ป่วยพร้อมกลับบ้าน
+
+- ระบบบันทึก: **เวลา Discharge**, ระยะเวลาผ่าตัดจริง
+- ผู้ป่วยที่เป็น IPD → ส่งกลับ ward
+- OPD → ออกจากโรงพยาบาลได้ทันที
+- ข้อมูลเหล่านี้จะไปอัปเดต **AI model** เพื่อเรียนรู้ความแม่นยำต่อ
+""")
+    p = next(x for x in _DEMO_PATIENTS_FULL if x['status'] == 'discharged')
+    st.markdown(f"""
+    <div class="case-card" style="background:#e8f5e9;border-left:5px solid #4caf50;">
+        <div><span class="pill" style="background:#4caf50;color:white;">✅ Discharge แล้ว</span></div>
+        <div style="margin-top:6px;">
+            <span class="pt-name">{p['name']}</span>
+            <span class="pt-hn">HN: {p['hn']} · อายุ {p['age']}</span>
+        </div>
+        <div style="color:#555;font-size:12px;margin-top:2px;">Dx: {p['dx']}</div>
+        <div class="pt-proc">{p['proc']}</div>
+        <div class="pt-meta">แพทย์: {p['surgeon']} · ใช้เวลาผ่า {p['duration_min']} นาที · กลับบ้าน {p['discharged_at']}</div>
+        <div style="margin-top:8px;padding:6px 10px;background:#c8e6c9;border-radius:4px;
+                    font-size:11px;color:#1b5e20;font-style:italic;">💡 {p['note']}</div>
+    </div>""", unsafe_allow_html=True)
+
+
+def _render_executive_demo_summary():
+    """🎬 Demo: สรุปยอด — แสดงตัวเลขสมมติ"""
+    _render_demo_banner()
+    st.markdown('<h3 style="color:#1565c0;">📊 สรุปยอดวันนี้ (Demo)</h3>',
+                unsafe_allow_html=True)
+    with st.expander("💡 หน้านี้คืออะไร?", expanded=False):
+        st.markdown("""
+**📊 สรุปยอด** = ภาพรวมการทำงานวันนี้ทั้งหมด
+
+- **เคสทั้งหมด/ผ่าเสร็จ/ยกเลิก** — ตัวเลขสำคัญที่ต้องดู
+- **OPD/IPD** — ประเภทผู้ป่วย
+- **Walk-in/Elective/Urgent** — ความเร่งด่วน
+- **เวลารอเฉลี่ย** — KPI หลักของ patient experience
+- **Turnover** — ประสิทธิภาพการเปลี่ยนเคส (ยิ่งน้อยยิ่งดี)
+- **🤖 AI accuracy** — บอกว่า model แม่นแค่ไหน (±10 นาที)
+""")
+
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("เคสทั้งหมด", "7")
+    r2.metric("ผ่าตัดสำเร็จ", "2")
+    r3.metric("ยกเลิก", "0", "อัตรา 0%")
+    r4.metric("Walk-in", "3", "43%")
+
+    r5, r6, r7, r8 = st.columns(4)
+    r5.metric("OPD", "6")
+    r6.metric("IPD", "1")
+    r7.metric("Elective", "5")
+    r8.metric("Urgent", "1")
+
+    st.markdown("---")
+    st.markdown('<div style="font-size:14px;font-weight:500;margin-bottom:6px;">'
+                '⏱️ เวลาที่น่าสนใจ (Demo)</div>', unsafe_allow_html=True)
+    t1, t2, t3 = st.columns(3)
+    t1.metric("เวลารอเฉลี่ย", "23 นาที", "-12 vs สัปดาห์ก่อน")
+    t2.metric("Turnover เฉลี่ย", "16 นาที", "เป้า ≤15")
+    t3.metric("AI accuracy", "78%", "±10 นาที")
+
+    st.markdown(
+        '<div style="background:#e8f5e9;border-radius:8px;padding:12px 16px;'
+        'margin-top:16px;border-left:4px solid #2e7d32;">'
+        '<div style="font-size:14px;font-weight:700;color:#2e7d32;margin-bottom:6px;">'
+        '💡 Highlights วันนี้</div>'
+        '<ul style="font-size:13px;color:#1b5e20;margin:0;padding-left:20px;line-height:1.7;">'
+        '<li>✅ เคสผ่าตัดเสร็จ 2 เคส · ไม่มี cancel</li>'
+        '<li>⏱️ เวลารอลดลง 12 นาที vs สัปดาห์ที่แล้ว</li>'
+        '<li>🤖 AI ทำนายแม่น 78% (±10 นาที) — แจ้งญาติได้แม่นยำ</li>'
+        '<li>🔄 Turnover 16 น. ใกล้เป้า 15 น. — efficient</li>'
+        '</ul></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_executive_demo_queue():
+    """🎬 Executive Demo — แสดง Live Queue ตัวอย่างพร้อม ETA หลากสี (ไม่แตะ DB)"""
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#fff8e1,#ffe082);'
+        'border-radius:8px;padding:10px 16px;margin-bottom:8px;'
+        'border-left:5px solid #f57c00;">'
+        '<span style="font-size:14px;font-weight:700;color:#f57c00;">'
+        '🎬 EXECUTIVE DEMO MODE</span> '
+        '<span style="font-size:13px;color:#bf360c;">ข้อมูลตัวอย่าง — สาธิตเท่านั้น ไม่บันทึก DB</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("💡 หน้านี้คืออะไร? (Live Queue + AI ETA)", expanded=False):
+        st.markdown("""
+**⏳ รอผ่าตัด** = หน้า **หัวใจของระบบ** — Live Queue ผู้ป่วยรอเข้าห้องผ่าตัด
+
+### 🎨 อ่านสีง่ายๆ
+- 🟢 **เขียว** = รอ ≤30 นาที (ปกติ)
+- 🟡 **เหลือง** = รอ 30-60 นาที (เริ่มนาน)
+- 🔴 **แดง** = รอ >60 นาที (ต้องรีบเข้าห้อง / แจ้งญาติ)
+
+### 🤖 AI ETA (Expected Time of Arrival to OR)
+- AI คำนวณว่าผู้ป่วยจะได้เข้าห้องผ่าตัดประมาณกี่โมง
+- ใช้ข้อมูล: เคสกำลังผ่า + AI ทำนายเวลาเสร็จ + คิวรอ + 5 น. turnover
+- **ประโยชน์:** แจ้งญาติได้แม่นยำ ลดความวิตกกังวล
+
+### 💼 Value สำหรับ Executive
+- 👥 **ลด workload พยาบาล** — ไม่ต้องตอบคำถามญาติบ่อย
+- 🏥 **ปรับ flow** — ห้องไหนว่าง รับเคสได้เพิ่ม
+- 📊 **measure ได้** — เวลารอจริงจะลดลง วัด KPI ได้
+""")
+
+    # Live Queue banner
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);'
+        'border-radius:10px;padding:10px 16px;margin-bottom:8px;'
+        'border-left:5px solid #e65100;">'
+        '<span style="font-size:14px;font-weight:700;color:#e65100;">🚦 Live Queue</span> '
+        '<span style="font-size:13px;color:#bf360c;">รอ 4 คน · '
+        'นานสุด 67 นาที · 🤖 ETA จาก AI prediction</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Room headers + fake patients ──
+    demo_rooms = [
+        ('🔬 ห้องผ่าตัด 1', 'Laser / Morpheus / Scaret / Emsculpt / Cooltect / Q-Switch', 2,
+         [
+            {'name': 'นายภัทรเดช ว.', 'hn': '690009822',
+             'proc': 'Morpheus (Aging Face)', 'surgeon': 'พ.ต.อ.เฉลิมเกียรติ',
+             'wait_min': 67, 'color': '#c62828', 'emoji': '🔴', 'level': 'รอนาน',
+             'eta': '14:35', 'time_to_eta': 'อีก 12 น.',
+             'note': 'AI: เคสกำลังผ่าใช้ 25 น. (เหลือ 12 น.)'},
+            {'name': 'น.ส.รัฐธีร์ ไ.', 'hn': '690011149',
+             'proc': 'Morpheus (Aging Face)', 'surgeon': 'พ.ต.อ.เฉลิมเกียรติ',
+             'wait_min': 28, 'color': '#e65100', 'emoji': '🟡', 'level': 'รอ',
+             'eta': '15:05', 'time_to_eta': 'อีก 42 น.',
+             'note': 'AI: คาดผ่าเสร็จเคสก่อน 14:35 + 30 น. ของเคสนี้'},
+         ]),
+        ('🔧 ห้องผ่าตัด 3', 'ESWL', 1,
+         [
+            {'name': 'นางสาวสุดารัตน์ ก.', 'hn': '670022345',
+             'proc': 'ESWL Lt. Renal stone', 'surgeon': 'พ.ต.ท.พงศ์ธร',
+             'wait_min': 15, 'color': '#2e7d32', 'emoji': '🟢', 'level': 'พึ่งมา',
+             'eta': '14:50', 'time_to_eta': 'อีก 27 น.',
+             'note': 'AI: ห้องว่างทันที + setup 5 น.'},
+         ]),
+        ('🏥 ห้องผ่าตัด 4-5', 'เคสทั่วไป (Excision / I&D / Stitch off)', 2,
+         [
+            {'name': 'น.ส.มาลี ส.', 'hn': '680033456',
+             'proc': 'I&D abscess at back', 'surgeon': 'แพทย์หญิงวริศฐา',
+             'wait_min': 5, 'color': '#2e7d32', 'emoji': '🟢', 'level': 'พึ่งมา',
+             'eta': '14:30', 'time_to_eta': 'อีก 7 น.',
+             'note': 'AI: ห้อง 4 ว่าง — พร้อมรับ'},
+         ]),
+    ]
+
+    for room_label, room_desc, capacity, patients in demo_rooms:
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);'
+            f'border-radius:10px;padding:12px 16px;margin:16px 0 8px;">'
+            f'<span style="font-size:18px;font-weight:700;color:#1565c0;">{room_label}</span>'
+            f'<span style="font-size:13px;color:#1976d2;margin-left:8px;">{room_desc}</span>'
+            f'<span style="float:right;background:#1565c0;color:#fff;border-radius:20px;'
+            f'padding:2px 12px;font-size:14px;font-weight:600;">{len(patients)} คน</span></div>',
+            unsafe_allow_html=True,
+        )
+
+        for p in patients:
+            card_html = (
+                f'<div class="case-card card-arrived">'
+                f'<div><span class="pill pill-arrive">⏳ รอผ่าตัด</span></div>'
+                f'<div style="margin-top:6px;">'
+                f'<span class="pt-name">{p["name"]}</span>'
+                f'<span class="pt-hn">HN: {p["hn"]}</span></div>'
+                f'<div class="pt-proc">{p["proc"]}</div>'
+                f'<div class="pt-meta">แพทย์: {p["surgeon"]}</div>'
+                f'<div style="margin-top:8px;padding:10px 12px;'
+                f'background:{p["color"]}15;border-left:4px solid {p["color"]};'
+                f'border-radius:6px;">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+                f'<div style="font-size:12px;color:{p["color"]};">'
+                f'{p["emoji"]} <b>{p["level"]} {p["wait_min"]} นาที</b></div>'
+                f'<div style="font-size:13px;color:{p["color"]};font-weight:600;">'
+                f'🤖 ETA <b>{p["eta"]}</b> ({p["time_to_eta"]})</div>'
+                f'</div>'
+                f'<div style="font-size:11px;color:#666;margin-top:4px;font-style:italic;">'
+                f'💡 {p["note"]}</div>'
+                f'</div></div>'
+            )
+            st.markdown(card_html, unsafe_allow_html=True)
+
+    # Insight footer
+    st.markdown(
+        '<div style="background:#e8f5e9;border-radius:8px;padding:12px 16px;'
+        'margin-top:16px;border-left:4px solid #2e7d32;">'
+        '<div style="font-size:14px;font-weight:700;color:#2e7d32;margin-bottom:6px;">'
+        '💡 Insight ที่ Dashboard ช่วย</div>'
+        '<ul style="font-size:13px;color:#1b5e20;margin:0;padding-left:20px;line-height:1.7;">'
+        '<li><b>นายภัทรเดช</b> รอ 67 นาที (🔴) → พยาบาลรู้ต้องอธิบายญาติทันที</li>'
+        '<li><b>AI ทำนาย ETA</b> ทุกเคส → แจ้งญาติได้ว่าจะถึงคิวเมื่อไหร่</li>'
+        '<li><b>ห้อง 4-5</b> ว่างทันที → จัดเคสเข้าได้เลย ลด idle time</li>'
+        '<li><b>Throughput ดีขึ้น</b> → รับเคสเพิ่ม + ลดเวลารอผู้ป่วย</li>'
+        '</ul></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _compute_live_queue_eta(view_date_str):
+    """🚦 Live Queue + ETA — คำนวณเวลาเข้าห้องผ่าตัดที่ทำนายสำหรับแต่ละเคสที่รอ
+
+    Logic:
+      1. หาเคสที่กำลังผ่าตัด (in_or) ในแต่ละห้อง → คำนวณเวลาที่ห้องจะว่าง
+      2. เรียงเคสรอ (arrived) ในห้องเดียวกันตาม arrived_at
+      3. ETA = นาทีที่ห้องว่างเร็วสุด + turnover 5 นาที
+      4. สีตาม wait_time: 🟢 ≤30 · 🟡 30-60 · 🔴 >60 นาที
+
+    Returns: dict {case_id: {'eta_str', 'time_to_eta', 'wait_min', 'color', 'emoji'}}
+    """
+    df = get_cases(op_date=view_date_str)
+    if df.empty:
+        return {}
+
+    now = _now_bkk()
+    df = df.copy()
+    df['_wait_room'] = df['procedure_name'].apply(_assign_waiting_room)
+
+    eta_dict = {}
+
+    for room_key in ['room1', 'room3', 'room45']:
+        # หา expected free times ของเคสที่กำลังผ่าในห้องนี้
+        room_active = df[(df['status'] == 'in_or') &
+                         (df['_wait_room'] == room_key)]
+        free_times = []
+        for _, ac in room_active.iterrows():
+            in_or_at = ac.get('in_or_at')
+            ai_pred = ac.get('ai_predicted_min')
+            if in_or_at and ai_pred:
+                try:
+                    in_or_dt = datetime.strptime(in_or_at, '%Y-%m-%d %H:%M:%S')
+                    expected_free = in_or_dt + timedelta(minutes=int(ai_pred))
+                    # ถ้าคำนวณแล้วผ่านเวลาปัจจุบันแล้ว → ใช้ now
+                    free_times.append(max(expected_free, now))
+                except (ValueError, TypeError):
+                    pass
+
+        # ห้อง 4-5 มี 2 ห้อง — สมมติทั้งคู่ว่างถ้าไม่มี active case
+        capacity = 2 if room_key == 'room45' else 1
+        while len(free_times) < capacity:
+            free_times.append(now)
+
+        # เคสที่รอในห้องเดียวกัน เรียงตามเวลาเข้ามารอ
+        room_waiting = df[(df['status'] == 'arrived') &
+                          (df['_wait_room'] == room_key)].copy()
+        if room_waiting.empty:
+            continue
+        room_waiting = room_waiting.sort_values('arrived_at')
+
+        for _, w in room_waiting.iterrows():
+            cid = int(w['case_id'])
+            # ห้องที่ว่างเร็วสุด
+            next_free = min(free_times)
+            # ETA = ห้องว่าง + 5 นาที turnover
+            eta = next_free + timedelta(minutes=5)
+            # คำนวณ wait_min (ตอนนี้ - arrived_at)
+            arrived_at = w.get('arrived_at')
+            wait_min = 0
+            if arrived_at:
+                try:
+                    arr_dt = datetime.strptime(arrived_at, '%Y-%m-%d %H:%M:%S')
+                    wait_min = max(0, int((now - arr_dt).total_seconds() / 60))
+                except (ValueError, TypeError):
+                    pass
+
+            # สีตามเวลารอ
+            if wait_min > 60:
+                color, emoji, level = '#c62828', '🔴', 'รอนาน'
+            elif wait_min > 30:
+                color, emoji, level = '#e65100', '🟡', 'รอ'
+            else:
+                color, emoji, level = '#2e7d32', '🟢', 'พึ่งมา'
+
+            # ETA in อีก... นาที / ชั่วโมง
+            time_to_eta_min = int((eta - now).total_seconds() / 60)
+            if time_to_eta_min <= 0:
+                time_to_eta_str = 'ใกล้คิว!'
+            elif time_to_eta_min < 60:
+                time_to_eta_str = f'อีก {time_to_eta_min} น.'
+            else:
+                time_to_eta_str = f'อีก {time_to_eta_min//60} ชม. {time_to_eta_min%60} น.'
+
+            eta_dict[cid] = {
+                'eta_str': eta.strftime('%H:%M'),
+                'time_to_eta': time_to_eta_str,
+                'wait_min': wait_min,
+                'color': color,
+                'emoji': emoji,
+                'level': level,
+            }
+
+            # update free_times: ลบห้องที่ใช้ไป + เพิ่มเวลาเสร็จใหม่
+            ai_pred_w = int(w.get('ai_predicted_min') or 30)
+            new_finish = eta + timedelta(minutes=ai_pred_w)
+            free_times.remove(min(free_times))
+            free_times.append(new_finish)
+
+    return eta_dict
+
+
 def _tab_waiting_room(view_date_str):
-    """Tab รอผ่าตัด — แสดงผู้ป่วยที่กดรับแล้ว (arrived) แบ่งตามห้อง."""
+    """Tab รอผ่าตัด — Live Queue + ETA สำหรับผู้ป่วยที่รอ (status='arrived')."""
+    # 🎬 Executive Demo override
+    if st.session_state.get('exec_demo_mode'):
+        _render_executive_demo_queue()
+        return
+
     df = get_cases(op_date=view_date_str)
 
     if df.empty:
@@ -306,6 +798,24 @@ def _tab_waiting_room(view_date_str):
     if waiting.empty:
         st.info("ไม่มีผู้ป่วยรอผ่าตัดขณะนี้")
         return
+
+    # คำนวณ ETA สำหรับทุกเคสที่รอ
+    eta_dict = _compute_live_queue_eta(view_date_str)
+    # เก็บใน session_state เพื่อใช้ใน _render_waiting_card
+    st.session_state['_live_eta'] = eta_dict
+
+    # Live Queue summary banner
+    n_wait = len(waiting)
+    longest = max([info['wait_min'] for info in eta_dict.values()], default=0)
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);'
+        f'border-radius:10px;padding:10px 16px;margin-bottom:8px;'
+        f'border-left:5px solid #e65100;">'
+        f'<span style="font-size:14px;font-weight:700;color:#e65100;">🚦 Live Queue</span> '
+        f'<span style="font-size:13px;color:#bf360c;">รอ {n_wait} คน · '
+        f'นานสุด {longest} นาที · refresh 1 นาที</span></div>',
+        unsafe_allow_html=True,
+    )
 
     # จัด room
     waiting['_wait_room'] = waiting['procedure_name'].apply(_assign_waiting_room)
@@ -345,12 +855,27 @@ def _tab_waiting_room(view_date_str):
 
 
 def _render_waiting_card(row):
-    """แสดง card ผู้ป่วยในห้องรอผ่าตัด พร้อม timer + ปุ่มเข้าห้องผ่าตัด."""
+    """แสดง card ผู้ป่วยในห้องรอผ่าตัด พร้อม timer + ETA + ปุ่มเข้าห้องผ่าตัด."""
     cid = int(row['case_id'])
     name_d = row['name'] or '-'
     hn_d = row['hn'] or '-'
     proc_d = row['procedure_name'] or '-'
     surg_d = row['surgeon_name'] or '-'
+
+    # ETA info จาก _compute_live_queue_eta (ผ่าน session_state)
+    eta_info = st.session_state.get('_live_eta', {}).get(cid)
+    eta_badge_html = ''
+    if eta_info:
+        eta_badge_html = (
+            f'<div style="margin-top:8px;padding:8px 12px;'
+            f'background:{eta_info["color"]}15;border-left:4px solid {eta_info["color"]};'
+            f'border-radius:6px;display:flex;justify-content:space-between;align-items:center;">'
+            f'<div style="font-size:12px;color:{eta_info["color"]};">'
+            f'{eta_info["emoji"]} <b>{eta_info["level"]} {eta_info["wait_min"]} นาที</b></div>'
+            f'<div style="font-size:13px;color:{eta_info["color"]};font-weight:600;">'
+            f'🤖 ETA <b>{eta_info["eta_str"]}</b> ({eta_info["time_to_eta"]})</div>'
+            f'</div>'
+        )
 
     st.markdown(f"""
     <div class="case-card card-arrived">
@@ -363,6 +888,7 @@ def _render_waiting_card(row):
         </div>
         <div class="pt-proc">{proc_d}</div>
         <div class="pt-meta">แพทย์: {surg_d}</div>
+        {eta_badge_html}
     </div>""", unsafe_allow_html=True)
 
     # Timer
@@ -428,6 +954,18 @@ _STATION_EMPTY = {
 
 
 def _tab_station(view_date_str, station):
+    # 🎬 Executive Demo override
+    if st.session_state.get('exec_demo_mode'):
+        if station == 'receive':
+            _render_executive_demo_receive()
+        elif station == 'or':
+            _render_executive_demo_or()
+        elif station == 'recovery':
+            _render_executive_demo_recovery()
+        elif station == 'discharge':
+            _render_executive_demo_discharge()
+        return
+
     df = get_cases(op_date=view_date_str)
 
     if df.empty:
@@ -1279,12 +1817,12 @@ def _render_summary_section(s, label, key_prefix):
     r7.metric("เคสนัดหมาย", s['n_set'])
     r8.metric("Walk-in", s['n_walkin'])
 
-    # Revenue + patho row
-    rv1, rv2, rv3, rv4 = st.columns(4)
-    rv1.metric("💰 ค่าหัตถการ", f"{s['total_treatment']:,} ฿")
-    rv2.metric("💵 รายได้รวม", f"{s['total_revenue']:,} ฿")
-    rv3.metric("🧬 ส่งชิ้นเนื้อ", f"{s['n_patho_sent']} ราย")
-    rv4.metric("🔬 ค่าชิ้นเนื้อ", f"{s['total_patho']:,} ฿")
+    # NOTE (thesis mode): ซ่อน Revenue + patho row — เปิดกลับโดย uncomment
+    # rv1, rv2, rv3, rv4 = st.columns(4)
+    # rv1.metric("💰 ค่าหัตถการ", f"{s['total_treatment']:,} ฿")
+    # rv2.metric("💵 รายได้รวม", f"{s['total_revenue']:,} ฿")
+    # rv3.metric("🧬 ส่งชิ้นเนื้อ", f"{s['n_patho_sent']} ราย")
+    # rv4.metric("🔬 ค่าชิ้นเนื้อ", f"{s['total_patho']:,} ฿")
 
     st.markdown("---")
 
@@ -1402,6 +1940,11 @@ def _render_after_hours_summary(df_cases, prefix=""):
 
 
 def _tab_summary():
+    # 🎬 Executive Demo override
+    if st.session_state.get('exec_demo_mode'):
+        _render_executive_demo_summary()
+        return
+
     today = _now_bkk().strftime('%Y-%m-%d')
     _thai_months = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
     _t = _now_bkk()
@@ -1416,33 +1959,81 @@ def _tab_summary():
 <div style="font-size:13px;opacity:.85;">{_thai_date} · {_t.strftime('%H:%M')} น.</div>
 </div>""", unsafe_allow_html=True)
 
-    # ── KPI Cards ──
-    st.markdown("""<style>
-div[data-testid="stMetric"] {background:#f8f9fa;border-radius:10px;padding:12px 16px;border:1px solid #e0e0e0;}
-div[data-testid="stMetric"] label {font-size:12px !important;color:#666 !important;}
-div[data-testid="stMetric"] [data-testid="stMetricValue"] {font-size:22px !important;font-weight:700 !important;}
-</style>""", unsafe_allow_html=True)
-
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric("เคสทั้งหมด", s['total'])
-    r2.metric("ผ่าเสร็จ", s['completed'])
-    r3.metric("ยกเลิก", s['cancelled'])
+    # ── 📊 ภาพรวม — 4 cards row ──
+    st.markdown(
+        '<div style="font-size:14px;font-weight:600;color:#546e7a;margin:14px 0 6px;">'
+        '📊 ภาพรวม</div>', unsafe_allow_html=True)
     cancel_rate = s['cancelled'] / s['total'] * 100 if s['total'] > 0 else 0
-    r4.metric("อัตรายกเลิก", "%.0f%%" % cancel_rate)
+    opd_pct = (s['n_opd'] / s['total'] * 100) if s['total'] > 0 else 0
+    ipd_pct = (s['n_ipd'] / s['total'] * 100) if s['total'] > 0 else 0
 
-    r5, r6, r7, r8 = st.columns(4)
-    r5.metric("OPD", s['n_opd'])
-    r6.metric("IPD", s['n_ipd'])
-    r7.metric("เคสนัดหมาย", s['n_set'])
-    r8.metric("Walk-in", s['n_walkin'])
+    def _sum_card(label, value, sub_text, value_color='#212121'):
+        return (
+            f'<div style="background:#f5f5f5;border-radius:8px;padding:14px;">'
+            f'<div style="font-size:12px;color:#757575;margin-bottom:4px;">{label}</div>'
+            f'<div style="font-size:26px;font-weight:500;line-height:1;color:{value_color};">{value}</div>'
+            f'<div style="font-size:11px;color:#9e9e9e;margin-top:4px;">{sub_text}</div>'
+            f'</div>'
+        )
+    r1, r2, r3, r4 = st.columns(4)
+    with r1:
+        st.markdown(_sum_card("📊 เคสทั้งหมด", s['total'],
+                              f"✓ ผ่าตัดสำเร็จ {s['completed']}",
+                              value_color='#1565c0'), unsafe_allow_html=True)
+    with r2:
+        st.markdown(_sum_card("🏥 OPD", s['n_opd'], f"{opd_pct:.1f}%"),
+                    unsafe_allow_html=True)
+    with r3:
+        st.markdown(_sum_card("🏨 IPD", s['n_ipd'], f"{ipd_pct:.1f}%"),
+                    unsafe_allow_html=True)
+    with r4:
+        st.markdown(_sum_card("⚠️ ยกเลิก", s['cancelled'],
+                              f"อัตรา {cancel_rate:.0f}%",
+                              value_color='#c62828'), unsafe_allow_html=True)
 
-    # ── Revenue ──
-    st.markdown('<div style="margin-top:8px;"></div>', unsafe_allow_html=True)
-    rv1, rv2, rv3, rv4 = st.columns(4)
-    rv1.metric("💰 ค่าหัตถการ", f"{s['total_treatment']:,} ฿")
-    rv2.metric("💵 รายได้รวม", f"{s['total_revenue']:,} ฿")
-    rv3.metric("🧬 ส่งชิ้นเนื้อ", f"{s['n_patho_sent']} ราย")
-    rv4.metric("🔬 ค่าชิ้นเนื้อ", f"{s['total_patho']:,} ฿")
+    # ── ⚠️ ระดับความเร่งด่วน — Elective (+breakdown) / Urgent / Emergency ──
+    # คำนวณเสมอ — ถ้าไม่มีข้อมูล จะเป็น 0 ทั้งหมด
+    n_elec = n_urg = n_emer = 0
+    n_elec_set = n_elec_walkin = 0
+    if not df_today.empty and 'op_type' in df_today.columns:
+        op_norm = (df_today['op_type'].fillna('elective')
+                   .astype(str).str.lower().str.strip()
+                   .replace('', 'elective'))
+        n_elec = int((op_norm == 'elective').sum())
+        n_urg = int((op_norm == 'urgent').sum())
+        n_emer = int((op_norm == 'emergency').sum())
+        if 'case_category' in df_today.columns:
+            mask_elec = (op_norm == 'elective')
+            n_elec_set = int(((df_today['case_category'] == 'เคสนัดหมาย') & mask_elec).sum())
+            n_elec_walkin = int(((df_today['case_category'] == 'Walk-in') & mask_elec).sum())
+
+    st.markdown(
+        '<div style="font-size:14px;font-weight:600;color:#546e7a;margin:14px 0 6px;">'
+        '⚠️ ระดับความเร่งด่วน</div>', unsafe_allow_html=True)
+    if True:
+        ko1, ko2, ko3 = st.columns(3)
+        with ko1:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">📋 Elective</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;margin-bottom:8px;">{n_elec}</div>'
+                f'<div style="font-size:12px;color:#888;display:flex;gap:10px;">'
+                f'<span>นัดหมาย <b style="color:#444;font-weight:500;">{n_elec_set}</b></span>'
+                f'<span style="color:#ccc;">|</span>'
+                f'<span>Walk-in <b style="color:#444;font-weight:500;">{n_elec_walkin}</b></span>'
+                f'</div></div>', unsafe_allow_html=True)
+        with ko2:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">⚡ Urgent</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;">{n_urg}</div>'
+                f'</div>', unsafe_allow_html=True)
+        with ko3:
+            st.markdown(
+                f'<div style="background:#f5f5f5;border-radius:8px;padding:14px 16px;">'
+                f'<div style="font-size:13px;color:#666;margin-bottom:4px;">🚨 Emergency</div>'
+                f'<div style="font-size:28px;font-weight:500;line-height:1.1;">{n_emer}</div>'
+                f'</div>', unsafe_allow_html=True)
 
     # ── Charts ──
     if not df_today.empty:

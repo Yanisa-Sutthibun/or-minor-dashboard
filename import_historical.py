@@ -441,14 +441,33 @@ def reimport_timestamps(intra_path: str, dry_run: bool = False):
             if not same:
                 changed += 1
             if not dry_run:
+                # ถ้ามี timestamps ผ่าเสร็จแล้ว → mark status เป็น discharged
+                new_status = 'discharged' if (new_in_or and new_op_end) else None
+                # 🆕 ดึง nurses + surgeon จาก intraop ด้วย (เคยขาดไป — bug fix)
+                new_scrub = str(i.get('nursurgnm', '') or '').strip() or None
+                new_circ = str(i.get('nurcircunm', '') or '').strip() or None
+                new_surg = str(i.get('dctnm', '') or '').strip() or None
+                if new_scrub and new_scrub.upper() in ('NAN', 'NONE'):
+                    new_scrub = None
+                if new_circ and new_circ.upper() in ('NAN', 'NONE'):
+                    new_circ = None
+                if new_surg and new_surg.upper() in ('NAN', 'NONE'):
+                    new_surg = None
                 conn.execute(
                     """UPDATE cases SET
                         arrived_at = COALESCE(?, arrived_at),
                         in_or_at = COALESCE(?, in_or_at),
                         op_end_at = COALESCE(?, op_end_at),
-                        actual_duration_min = COALESCE(?, actual_duration_min)
+                        actual_duration_min = COALESCE(?, actual_duration_min),
+                        status = COALESCE(?, status),
+                        discharged_at = COALESCE(?, discharged_at),
+                        scrub_nurse = COALESCE(?, scrub_nurse),
+                        circ_nurse = COALESCE(?, circ_nurse),
+                        surgeon_name = COALESCE(?, surgeon_name)
                        WHERE case_id=?""",
-                    (new_arrived, new_in_or, new_op_end, new_actual_min, case_id)
+                    (new_arrived, new_in_or, new_op_end, new_actual_min,
+                     new_status, new_op_end,
+                     new_scrub, new_circ, new_surg, case_id)
                 )
                 updated += 1
 
