@@ -1754,22 +1754,57 @@ def _render_historical_analytics(date_from: str, date_to: str):
                                    showgrid=False),
                         plot_bgcolor='white',
                     )
-                    st.plotly_chart(fig_mh, use_container_width=True)
+                    # ปิด modebar (camera/zoom icons) — บัง row จันทร์
+                    st.plotly_chart(
+                        fig_mh, use_container_width=True,
+                        config={'displayModeBar': False})
 
-            # การ์ดสรุป peak day (รายวัน) + caption
+            # 🎨 Color legend — แสดง gradient พร้อมคำอธิบาย
+            st.markdown(
+                f'<div style="background:#fafafa;border-radius:8px;'
+                f'padding:10px 14px;margin-top:10px;'
+                f'border:0.5px solid #e0e0e0;">'
+                f'<div style="font-size:12px;color:#455a64;font-weight:500;'
+                f'margin-bottom:6px;">📖 วิธีอ่าน:</div>'
+                f'<div style="display:flex;align-items:center;gap:8px;'
+                f'flex-wrap:wrap;">'
+                f'<span style="font-size:12px;color:#455a64;">'
+                f'ยิ่งสีเข้ม = เคสเยอะ →</span>'
+                f'<div style="display:flex;gap:2px;">'
+                f'<div style="width:24px;height:18px;background:#ebedf0;'
+                f'border-radius:3px;" title="ไม่มีเคส"></div>'
+                f'<div style="width:24px;height:18px;background:#d4e6f7;'
+                f'border-radius:3px;"></div>'
+                f'<div style="width:24px;height:18px;background:#9ec8eb;'
+                f'border-radius:3px;"></div>'
+                f'<div style="width:24px;height:18px;background:#4fa3d6;'
+                f'border-radius:3px;"></div>'
+                f'<div style="width:24px;height:18px;background:#1976d2;'
+                f'border-radius:3px;"></div>'
+                f'<div style="width:24px;height:18px;background:#0d47a1;'
+                f'border-radius:3px;"></div>'
+                f'</div>'
+                f'<span style="font-size:11px;color:#90a4ae;">'
+                f'(0 เคส → {_global_max} เคส)</span>'
+                f'</div>'
+                f'<div style="font-size:11px;color:#607d8b;margin-top:8px;">'
+                f'• cell = 1 วัน · จ–ศ เท่านั้น (ไม่รวมเสาร์-อาทิตย์)<br>'
+                f'• W1–W5 = สัปดาห์ที่ 1–5 ของเดือน · '
+                f'title แดง ★ = เดือนที่เคสเยอะสุด<br>'
+                f'• hover ดูจำนวนเคสและวันที่จริง'
+                f'</div></div>',
+                unsafe_allow_html=True)
+
+            # การ์ดสรุป peak day (รายวัน)
             st.markdown(
                 f'<div style="background:#fff3e0;border-radius:10px;'
                 f'padding:10px 14px;border-left:4px solid #c62828;'
-                f'margin-top:8px;">'
+                f'margin-top:10px;">'
                 f'<span style="font-size:13px;color:#bf360c;">'
                 f'<b>📈 วันที่เคสเยอะสุด:</b> {_max_n_d} เคส · '
                 f'วันที่ {_max_date_th_d} · '
                 f'เฉลี่ย/วัน {_avg_per_day_d} เคส</span></div>',
                 unsafe_allow_html=True)
-            st.caption(
-                "🟦 cell = วันหนึ่ง · สีเข้ม = เคสเยอะ · "
-                "สีเทา = ไม่มีเคส · W1–W5 = สัปดาห์ที่ 1–5 ของเดือน · "
-                "title แดง★ = เดือน peak")
     else:
         st.caption("ยังไม่มีข้อมูลรายวัน")
 
