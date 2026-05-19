@@ -125,22 +125,26 @@ _ADMIN_CSS = """
     margin: 20px 0 10px; padding-bottom: 6px;
     border-bottom: 2px solid #e0e0e0;
 }
-/* Group header (level 1): big colored heading for sections */
+/* Group header (level 1): big BOLD colored heading for major sections */
 .group-header {
-    font-size: 18px; font-weight: 700; color: #1565c0;
-    margin: 32px 0 14px; padding: 10px 18px;
-    background: #e3f2fd;
-    border-left: 5px solid #1565c0; border-radius: 6px;
+    font-size: 22px; font-weight: 800; color: #0d47a1;
+    margin: 40px 0 18px; padding: 14px 22px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #f5fbff 100%);
+    border-left: 8px solid #1565c0; border-radius: 10px;
+    letter-spacing: 0.2px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
-.group-header.green   { color: #2e7d32; background: #e8f5e9; border-left-color: #2e7d32; }
-.group-header.purple  { color: #6a1b9a; background: #f3e5f5; border-left-color: #6a1b9a; }
-.group-header.orange  { color: #e65100; background: #fff3e0; border-left-color: #e65100; }
-.group-header.teal    { color: #00695c; background: #e0f2f1; border-left-color: #00695c; }
-.group-header.indigo  { color: #283593; background: #e8eaf6; border-left-color: #283593; }
-/* Subsection (level 2): smaller header inside a group */
+.group-header.green   { color: #1b5e20; background: linear-gradient(135deg,#e8f5e9 0%,#f5fbf5 100%); border-left-color: #2e7d32; }
+.group-header.purple  { color: #4a148c; background: linear-gradient(135deg,#f3e5f5 0%,#fbf5fb 100%); border-left-color: #6a1b9a; }
+.group-header.orange  { color: #bf360c; background: linear-gradient(135deg,#fff3e0 0%,#fff9f0 100%); border-left-color: #e65100; }
+.group-header.teal    { color: #004d40; background: linear-gradient(135deg,#e0f2f1 0%,#f0faf9 100%); border-left-color: #00695c; }
+.group-header.indigo  { color: #1a237e; background: linear-gradient(135deg,#e8eaf6 0%,#f5f6fc 100%); border-left-color: #283593; }
+/* Subsection (level 2): clear divider with accent line */
 .sub-title {
-    font-size: 14px; font-weight: 600; color: #546e7a;
-    margin: 14px 0 6px;
+    font-size: 16px; font-weight: 600; color: #37474f;
+    margin: 22px 0 10px; padding: 8px 12px;
+    background: #fafafa;
+    border-left: 4px solid #90a4ae; border-radius: 4px;
 }
 </style>
 """
@@ -1507,22 +1511,104 @@ def _render_historical_analytics(date_from: str, date_to: str):
     st.markdown('<div class="group-header purple">📈 แนวโน้มเวลา</div>',
                 unsafe_allow_html=True)
 
-    # 📊 จำนวนเคสรายวัน
-    st.markdown('<div class="sub-title">📊 จำนวนเคสรายวัน</div>',
+    # 📅 Calendar Heatmap (แบบ GitHub) — แทน daily bar เดิม
+    st.markdown('<div class="sub-title">📅 จำนวนเคสรายวัน (Calendar Heatmap)</div>',
                 unsafe_allow_html=True)
     daily = data['daily_total']
     if not daily.empty:
-        daily = daily.copy()
-        daily['date_label'] = pd.to_datetime(daily['op_date']).dt.strftime('%d/%m')
-        fig = px.bar(daily, x='date_label', y='n_cases',
-                     labels={'date_label': 'วันที่', 'n_cases': 'จำนวนเคส'},
-                     color_discrete_sequence=['#42a5f5'])
-        fig.update_layout(
-            margin=dict(t=10, b=40, l=40, r=10), height=260,
-            xaxis_title='วันที่', yaxis_title='จำนวนเคส',
-            xaxis=dict(tickangle=-45),
+        # เตรียม daily count
+        _daily_h = daily.copy()
+        _daily_h['op_date'] = _daily_h['op_date'].astype(str)
+        # Stat summary
+        _max_n = int(_daily_h['n_cases'].max())
+        _max_date = _daily_h.loc[_daily_h['n_cases'].idxmax(), 'op_date']
+        _max_date_th = pd.to_datetime(_max_date).strftime('%d/%m/%Y')
+        _avg_per_day = round(_daily_h['n_cases'].mean(), 1)
+
+        # เติม full date range เพื่อให้เห็นวันที่ไม่มีเคส (เป็น 0)
+        _full_dates = pd.date_range(date_from, date_to)
+        _cal_df = pd.DataFrame({'_dt': _full_dates})
+        _cal_df['op_date'] = _cal_df['_dt'].dt.strftime('%Y-%m-%d')
+        _cal_df = _cal_df.merge(
+            _daily_h[['op_date', 'n_cases']], on='op_date', how='left').fillna(0)
+        _cal_df['n_cases'] = _cal_df['n_cases'].astype(int)
+        _cal_df['dow'] = _cal_df['_dt'].dt.dayofweek  # 0=Mon
+        _cal_df['week_start'] = _cal_df['_dt'] - pd.to_timedelta(
+            _cal_df['dow'], unit='D')
+
+        # Pivot: rows=dow (จ-อา), cols=week_start
+        _pivot = (_cal_df.pivot(index='dow', columns='week_start',
+                                values='n_cases').fillna(0).astype(int))
+        _pivot = _pivot.reindex(range(7), fill_value=0)
+        _week_labels = [pd.to_datetime(w).strftime('%d/%m')
+                        for w in _pivot.columns]
+        _THAI_DAY_SHORT = ['จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส', 'อา']
+        _dow_labels = [_THAI_DAY_SHORT[i] for i in _pivot.index]
+
+        # Custom hover text
+        _hover_text = []
+        for dow_idx in _pivot.index:
+            row_text = []
+            for week_start in _pivot.columns:
+                _actual_date = pd.to_datetime(week_start) + pd.Timedelta(
+                    days=int(dow_idx))
+                _date_str = _actual_date.strftime('%d/%m/%Y')
+                _cnt = _pivot.loc[dow_idx, week_start]
+                row_text.append(
+                    f'{_date_str} (วัน{_THAI_DAY_SHORT[dow_idx]})<br>'
+                    f'{int(_cnt)} เคส')
+            _hover_text.append(row_text)
+
+        fig_cal = go.Figure(data=go.Heatmap(
+            z=_pivot.values,
+            x=_week_labels,
+            y=_dow_labels,
+            text=_hover_text,
+            hovertemplate='%{text}<extra></extra>',
+            colorscale=[
+                [0.0, '#ebedf0'],
+                [0.001, '#d4e6f7'],
+                [0.25, '#9ec8eb'],
+                [0.5, '#4fa3d6'],
+                [0.75, '#1976d2'],
+                [1.0, '#0d47a1'],
+            ],
+            xgap=2, ygap=2,
+            colorbar=dict(title=dict(text='เคส', font=dict(size=11)),
+                          thickness=12, len=0.8),
+            zmin=0,
+        ))
+        fig_cal.update_layout(
+            margin=dict(t=20, b=40, l=30, r=10),
+            height=220,
+            xaxis=dict(tickangle=-45, side='top',
+                       tickfont=dict(size=10),
+                       title=dict(text='สัปดาห์ (จันทร์)', font=dict(size=10))),
+            yaxis=dict(autorange='reversed', tickfont=dict(size=11)),
+            plot_bgcolor='white',
         )
-        st.plotly_chart(fig, use_container_width=True)
+
+        col_h1, col_h2 = st.columns([3, 1])
+        with col_h1:
+            st.plotly_chart(fig_cal, use_container_width=True)
+            st.caption(
+                "🟦 สี่เหลี่ยม = วันหนึ่ง · สีเข้ม = เคสเยอะ · "
+                "สีเทา = ไม่มีเคส · hover ดูจำนวน")
+        with col_h2:
+            st.markdown(
+                f'<div style="background:#fff3e0;border-radius:10px;'
+                f'padding:14px;border-left:4px solid #c62828;">'
+                f'<div style="font-size:11px;color:#bf360c;font-weight:500;">'
+                f'📈 วันที่เคสเยอะสุด</div>'
+                f'<div style="font-size:32px;font-weight:500;color:#c62828;'
+                f'line-height:1;margin:6px 0;">{_max_n}</div>'
+                f'<div style="font-size:11px;color:#bf360c;">'
+                f'เคส · {_max_date_th}</div>'
+                f'<div style="border-top:1px solid #ffcc80;margin:8px 0;'
+                f'padding-top:8px;font-size:10px;color:#5d4037;">เฉลี่ย/วัน</div>'
+                f'<div style="font-size:20px;font-weight:500;color:#5d4037;'
+                f'line-height:1;">{_avg_per_day}</div>'
+                f'</div>', unsafe_allow_html=True)
     else:
         st.caption("ยังไม่มีข้อมูลรายวัน")
 
@@ -1707,6 +1793,51 @@ def _render_historical_analytics(date_from: str, date_to: str):
     else:
         st.caption("ยังไม่มีข้อมูลหัตถการ")
 
+    # ── 👨‍⚕️ Top 5 แพทย์ (ดึงจาก intraop) — อยู่ในกลุ่มอันดับยอดนิยม ──
+    from minor_or_db import get_cases as _get_cases_for_surg
+    _df_surg = _get_cases_for_surg()
+    _df_surg = _df_surg[(_df_surg['op_date'] >= date_from) &
+                        (_df_surg['op_date'] <= date_to) &
+                        (_df_surg['status'] != 'cancelled')]
+    st.markdown('<div class="sub-title">👨‍⚕️ Top 5 แพทย์ (จากข้อมูล intraop)</div>',
+                unsafe_allow_html=True)
+    if not _df_surg.empty and 'surgeon_name' in _df_surg.columns:
+        _surg = _df_surg.dropna(subset=['surgeon_name'])
+        _surg = _surg[_surg['surgeon_name'].astype(str).str.strip() != '']
+        if not _surg.empty:
+            _top_surg = (_surg['surgeon_name'].value_counts()
+                         .head(5).reset_index())
+            _top_surg.columns = ['surgeon', 'n_cases']
+            _max_surg = _top_surg['n_cases'].max()
+            _top_surg['pct'] = (_top_surg['n_cases'] / _max_surg * 100)
+            _purple_shades = ['#5e35b1', '#7e57c2', '#9575cd',
+                              '#b39ddb', '#d1c4e9']
+            for i, row in _top_surg.iterrows():
+                _color = _purple_shades[i] if i < 5 else '#d1c4e9'
+                _text_color = '#4527a0' if i >= 4 else _color
+                st.markdown(
+                    f'<div style="display:flex;align-items:center;gap:10px;'
+                    f'padding:6px 0;">'
+                    f'<div style="background:{_color};color:white;'
+                    f'width:26px;height:26px;border-radius:50%;display:flex;'
+                    f'align-items:center;justify-content:center;font-size:12px;'
+                    f'font-weight:600;">{i+1}</div>'
+                    f'<div style="flex:1;">'
+                    f'<div style="font-size:13px;color:#263238;">'
+                    f'{row["surgeon"]}</div>'
+                    f'<div style="background:#ede7f6;height:6px;'
+                    f'border-radius:3px;margin-top:3px;">'
+                    f'<div style="background:{_color};width:{row["pct"]:.0f}%;'
+                    f'height:100%;border-radius:3px;"></div></div></div>'
+                    f'<div style="font-size:14px;font-weight:600;'
+                    f'color:{_text_color};min-width:60px;text-align:right;">'
+                    f'{row["n_cases"]} เคส</div></div>',
+                    unsafe_allow_html=True)
+        else:
+            st.caption("ยังไม่มีข้อมูล surgeon_name")
+    else:
+        st.caption("ยังไม่มีข้อมูล surgeon_name")
+
     # ════════════════════════════════════════════════════════════════
     # 4.5️⃣  👥 Progress รายบุคคล (PIN-protected)
     # ════════════════════════════════════════════════════════════════
@@ -1791,7 +1922,9 @@ def _render_historical_analytics(date_from: str, date_to: str):
 
             st.markdown(
                 '<div style="font-size:12px;color:#666;margin:10px 0 4px;'
-                'font-weight:500;">🗓️ รับเวรตามวันในสัปดาห์</div>',
+                'font-weight:500;border-left:3px solid #ef6c00;padding-left:8px;">'
+                '🗓️ <b>A.</b> รับเวรตามวันในสัปดาห์ '
+                '<span style="color:#999;font-weight:400;">(สีส้ม)</span></div>',
                 unsafe_allow_html=True)
             fig_dow = px.bar(
                 dow_summary, x='day_name', y='n_cases',
@@ -1800,18 +1933,28 @@ def _render_historical_analytics(date_from: str, date_to: str):
                 labels={'day_name': '', 'n_cases': 'เคส'},
             )
             fig_dow.update_traces(textposition='outside')
+            _y_max_ho = max(float(dow_summary['n_cases'].max()), 1.0)
             fig_dow.update_layout(
-                margin=dict(t=20, b=30, l=30, r=10), height=200,
-                xaxis_title='', yaxis_title='', showlegend=False,
+                margin=dict(t=30, b=30, l=30, r=10), height=220,
+                xaxis_title='',
+                yaxis=dict(title='', range=[0, _y_max_ho * 1.25]),
+                showlegend=False,
+                plot_bgcolor='#fff8f0',
             )
             st.plotly_chart(fig_dow, use_container_width=True)
 
-        # 🅱️ Monthly Bar — จำนวนเคสรับเวรต่อเดือน
+        # 🅱️ Monthly Bar — จำนวนเคสรับเวรต่อเดือน (สีต่างจาก A ให้รู้ว่าคนละ chart)
         monthly = ho.get('monthly')
         if monthly is not None and not monthly.empty:
+            # Visual divider
             st.markdown(
-                '<div style="font-size:12px;color:#666;margin:14px 0 4px;'
-                'font-weight:500;">📈 เคสรับเวรรายเดือน</div>',
+                '<div style="border-top:1px dashed #cfd8dc;margin:14px 0 0;"></div>',
+                unsafe_allow_html=True)
+            st.markdown(
+                '<div style="font-size:12px;color:#666;margin:10px 0 4px;'
+                'font-weight:500;border-left:3px solid #1565c0;padding-left:8px;">'
+                '📈 <b>B.</b> เคสรับเวรรายเดือน '
+                '<span style="color:#999;font-weight:400;">(สีน้ำเงิน)</span></div>',
                 unsafe_allow_html=True)
             _thai_m = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
                        'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
@@ -1819,23 +1962,45 @@ def _render_historical_analytics(date_from: str, date_to: str):
             _m['month_th'] = _m['month'].apply(
                 lambda x: _thai_m[int(x.split('-')[1])] if x and '-' in x else x)
             _y1_max = max(int(_m['n_cases'].max()), 1)
-            fig_m = px.bar(
-                _m, x='month_th', y='n_cases', text='n_cases',
-                labels={'month_th': '', 'n_cases': 'จำนวนเคสรับเวร'},
-                color_discrete_sequence=['#ef6c00'],
-            )
-            fig_m.update_traces(
-                textposition='outside',
+            # 📈 LINE chart (time series — ใช้ line ดีกว่า bar)
+            _max_n = _m['n_cases'].max()
+            _marker_colors = [
+                '#0d47a1' if n == _max_n and n > 0 else '#1976d2'
+                for n in _m['n_cases']
+            ]
+            fig_m = go.Figure()
+            fig_m.add_trace(go.Scatter(
+                x=_m['month_th'], y=_m['n_cases'],
+                mode='lines+markers+text',
+                line=dict(color='#1976d2', width=3),
+                marker=dict(size=12, color=_marker_colors,
+                            line=dict(width=2, color='white')),
+                text=_m['n_cases'],
+                textposition='top center',
+                textfont=dict(size=12, color='#0d47a1'),
                 hovertemplate='<b>%{x}</b><br>เคสรับเวร: %{y}<extra></extra>',
-            )
+                fill='tozeroy',
+                fillcolor='rgba(25, 118, 210, 0.10)',
+            ))
+            # เส้นค่าเฉลี่ย (reference line)
+            _mean_n = _m['n_cases'].mean()
+            fig_m.add_hline(y=_mean_n, line_dash='dot', line_color='#90a4ae',
+                            annotation_text=f'เฉลี่ย {_mean_n:.1f}',
+                            annotation_position='top right',
+                            annotation_font_size=10,
+                            annotation_font_color='#546e7a')
             fig_m.update_layout(
                 margin=dict(t=30, b=30, l=50, r=10), height=240,
-                xaxis_title='', showlegend=False,
+                xaxis=dict(title='', tickfont=dict(size=12)),
+                showlegend=False,
                 yaxis=dict(title='จำนวนเคสรับเวร',
-                           range=[0, _y1_max * 1.25]),
+                           range=[0, _y1_max * 1.30]),
+                plot_bgcolor='#f0f7ff',
             )
             st.plotly_chart(fig_m, use_container_width=True)
-            st.caption("💡 ดูชั่วโมง OT ในตาราง 'สรุปรายเดือน' ด้านล่าง")
+            st.caption("💡 จุดน้ำเงินเข้ม = เดือนรับเวรเยอะสุด · "
+                       "เส้นประ = ค่าเฉลี่ย · "
+                       "ดูชั่วโมง OT ในตาราง 'สรุปรายเดือน' ด้านล่าง")
 
     # 🔄 Turnover Time — เรียบง่าย เข้าใจง่ายสำหรับคนทั่วไป
     st.markdown('<div class="sub-title">🔄 Turnover Time (เวลาพักระหว่างเคส)</div>',
@@ -1850,12 +2015,15 @@ def _render_historical_analytics(date_from: str, date_to: str):
     else:
         BENCHMARK = 15
         _avg = tto['avg']
-        _avg_color = '#2e7d32' if _avg <= BENCHMARK else (
-            '#e65100' if _avg <= BENCHMARK * 1.5 else '#c62828')
-        _diff = _avg - BENCHMARK
+        _median = tto.get('median', _avg)
+        _p90 = tto.get('p90', _avg)
+        # ใช้ median เป็นตัวตัดสิน (robust ต่อ outlier) — defendable ใน thesis
+        _avg_color = '#2e7d32' if _median <= BENCHMARK else (
+            '#e65100' if _median <= BENCHMARK * 1.5 else '#c62828')
+        _diff = _median - BENCHMARK
         if _diff <= 0:
             _verdict_bg = '#e8f5e9'; _verdict_color = '#2e7d32'
-            _verdict_text = f'🟢 อยู่ในเป้า (น้อยกว่า {BENCHMARK} น.)'
+            _verdict_text = f'🟢 อยู่ในเป้า (median ≤{BENCHMARK} น.)'
         elif _diff <= BENCHMARK * 0.5:
             _verdict_bg = '#fff3e0'; _verdict_color = '#e65100'
             _verdict_text = f'🟡 เกินเป้า {_diff:.1f} นาที'
@@ -1865,21 +2033,25 @@ def _render_historical_analytics(date_from: str, date_to: str):
 
         bc1, bc2 = st.columns([1, 2])
         with bc1:
+            # การ์ดแสดง median ใหญ่ + mean/p90 รอง (best practice — robust statistics)
             st.markdown(
                 f'<div style="background:white;border:0.5px solid #e0e0e0;'
                 f'border-radius:10px;padding:14px;text-align:center;">'
-                f'<div style="font-size:12px;color:#757575;">เวลาพักเฉลี่ย</div>'
+                f'<div style="font-size:12px;color:#757575;">เวลาพัก (median)</div>'
                 f'<div style="font-size:40px;font-weight:500;line-height:1;'
-                f'color:{_avg_color};margin:6px 0;">{_avg}'
+                f'color:{_avg_color};margin:6px 0;">{_median}'
                 f'<span style="font-size:20px;"> น.</span></div>'
-                f'<div style="font-size:11px;color:#9e9e9e;">เคส {tto["n"]} ครั้ง</div>'
+                f'<div style="font-size:10px;color:#9e9e9e;">'
+                f'mean {_avg} · p90 {_p90} · n={tto["n"]}</div>'
                 f'<div style="margin-top:8px;background:{_verdict_bg};padding:4px 10px;'
                 f'border-radius:4px;font-size:11px;color:{_verdict_color};'
                 f'display:inline-block;">{_verdict_text}</div></div>',
                 unsafe_allow_html=True)
         with bc2:
-            scale_max = max(BENCHMARK * 2.5, _avg * 1.1)
-            bar_width = min(_avg / scale_max * 100, 100)
+            # ใช้ median สำหรับแท่งหลัก + แสดง p90 เป็น marker (P90 = 90% เคสไม่เกิน)
+            scale_max = max(BENCHMARK * 2.5, _p90 * 1.1, _median * 1.5)
+            bar_width = min(_median / scale_max * 100, 100)
+            p90_pos = min(_p90 / scale_max * 100, 100)
             target_pos = BENCHMARK / scale_max * 100
             st.markdown(
                 f'<div style="background:white;border:0.5px solid #e0e0e0;'
@@ -1887,25 +2059,31 @@ def _render_historical_analytics(date_from: str, date_to: str):
                 f'<div style="font-size:12px;color:#666;margin-bottom:10px;">'
                 f'เทียบกับเป้าหมาย (≤{BENCHMARK} นาที)</div>'
                 f'<div style="position:relative;background:#e8f5e9;border-radius:6px;'
-                f'height:30px;margin:18px 0 6px;">'
+                f'height:30px;margin:22px 0 6px;">'
                 f'<div style="position:absolute;left:0;top:0;bottom:0;width:{bar_width}%;'
                 f'background:{_avg_color};border-radius:6px 0 0 6px;display:flex;'
                 f'align-items:center;padding-left:10px;">'
                 f'<span style="color:white;font-size:12px;font-weight:600;">'
-                f'จริง {_avg} น.</span></div>'
+                f'median {_median} น.</span></div>'
                 f'<div style="position:absolute;left:{target_pos}%;top:-4px;bottom:-4px;'
                 f'border-left:2px dashed #2e7d32;"></div>'
-                f'<div style="position:absolute;left:{target_pos}%;top:-20px;'
+                f'<div style="position:absolute;left:{target_pos}%;top:-22px;'
                 f'transform:translateX(-50%);font-size:10px;color:#2e7d32;font-weight:600;">'
                 f'🎯 เป้า {BENCHMARK}</div>'
+                f'<div style="position:absolute;left:{p90_pos}%;top:-6px;bottom:-6px;'
+                f'border-left:2px solid #c62828;"></div>'
+                f'<div style="position:absolute;left:{p90_pos}%;bottom:-22px;'
+                f'transform:translateX(-50%);font-size:10px;color:#c62828;font-weight:600;'
+                f'white-space:nowrap;">p90 {_p90}</div>'
                 f'</div>'
-                f'<div style="font-size:11px;color:#9e9e9e;margin-top:8px;">'
-                f'แท่งสี = เวลาพักจริง · เส้นเขียว = เป้าหมาย</div>'
+                f'<div style="font-size:11px;color:#9e9e9e;margin-top:22px;">'
+                f'🟦 median = 50% เคสไม่เกินค่านี้ · 🔴 p90 = 90% ไม่เกินค่านี้ · '
+                f'🟢 เส้นประ = เป้าหมาย</div>'
                 f'</div>', unsafe_allow_html=True)
 
         # Insight box
         if _diff > 0:
-            potential_pct = min(round(_diff / _avg * 100), 50)
+            potential_pct = min(round(_diff / _median * 100), 50)
             st.markdown(
                 f'<div style="background:#fff3e0;border-radius:8px;padding:10px 14px;'
                 f'border-left:4px solid #e65100;margin-top:10px;">'
@@ -1932,6 +2110,69 @@ def _render_historical_analytics(date_from: str, date_to: str):
             st.caption(
                 f"{_icon} เคสที่อยู่ในเป้า ≤{BENCHMARK} น. ทั้งช่วง: "
                 f"**{_in_target}/{_total} ครั้ง ({_pct_in}%)**")
+
+    # ════════════════════════════════════════════════════════════════
+    # 5.5️⃣  📅 เฉลี่ยตามวันในสัปดาห์
+    # ════════════════════════════════════════════════════════════════
+
+    # ── โหลด _df_daily สำหรับ sub-sections ──
+    from minor_or_db import get_cases as _get_cases_for_daily
+    _df_daily = _get_cases_for_daily()
+    _df_daily = _df_daily[(_df_daily['op_date'] >= date_from) &
+                          (_df_daily['op_date'] <= date_to) &
+                          (_df_daily['status'] != 'cancelled')]
+    if not _df_daily.empty:
+        # ── 5.5.2 เฉลี่ยตามวันในสัปดาห์ ──
+        st.markdown('<div class="sub-title">📊 เฉลี่ยเคสตามวันในสัปดาห์ '
+                    '(วันไหนงานหนักสุด)</div>',
+                    unsafe_allow_html=True)
+        _dow_df = _df_daily.copy()
+        _dow_df['_dt'] = pd.to_datetime(_dow_df['op_date'])
+        _dow_df['dow'] = _dow_df['_dt'].dt.dayofweek
+        _dow_only = _dow_df[_dow_df['dow'].between(0, 4)]
+        # นับเคสต่อ (วัน × dow) แล้วเฉลี่ย
+        _daily_dow = (_dow_only.groupby(['op_date', 'dow'])
+                      .size().reset_index(name='n'))
+        _dow_avg = (_daily_dow.groupby('dow')['n'].mean()
+                    .round(1).reset_index())
+        _THAI_DAY = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสฯ', 'ศุกร์']
+        # เติม dow ที่ขาด
+        _all_dow = pd.DataFrame({'dow': range(5)})
+        _dow_avg = _all_dow.merge(_dow_avg, on='dow', how='left').fillna(0)
+        _dow_avg['day_name'] = _dow_avg['dow'].apply(lambda d: _THAI_DAY[d])
+        _max_dow_avg = _dow_avg['n'].max()
+        _max_dow_name = _dow_avg.loc[_dow_avg['n'].idxmax(), 'day_name']
+        _dow_avg['color_flag'] = _dow_avg['n'].apply(
+            lambda v: 'peak' if v == _max_dow_avg and v > 0 else 'normal')
+
+        fig_dow_avg = px.bar(_dow_avg, x='day_name', y='n', text='n',
+                             color='color_flag',
+                             color_discrete_map={
+                                 'peak': '#c62828', 'normal': '#4fc3f7'},
+                             labels={'day_name': '', 'n': 'เคสเฉลี่ย/วัน'})
+        fig_dow_avg.update_traces(
+            textposition='outside',
+            hovertemplate='<b>%{x}</b><br>เฉลี่ย %{y} เคส/วัน<extra></extra>')
+        _y_max_dow = max(float(_dow_avg['n'].max()), 1.0)
+        fig_dow_avg.update_layout(
+            margin=dict(t=40, b=30, l=40, r=10), height=240,
+            xaxis_title='',
+            yaxis=dict(title='เคสเฉลี่ย/วัน',
+                       range=[0, _y_max_dow * 1.25]),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_dow_avg, use_container_width=True)
+        # Insight
+        _min_dow_avg = _dow_avg[_dow_avg['n'] > 0]['n'].min()
+        if _min_dow_avg > 0:
+            _pct_heavier = round((_max_dow_avg / _min_dow_avg - 1) * 100)
+            st.markdown(
+                f'<div style="background:#ffebee;border-left:3px solid #c62828;'
+                f'padding:8px 12px;border-radius:0 6px 6px 0;'
+                f'font-size:12px;color:#b71c1c;margin-top:6px;">'
+                f'<b>วัน{_max_dow_name}</b> หนักสุด เฉลี่ย {_max_dow_avg} เคส/วัน · '
+                f'หนักกว่าวันที่น้อยที่สุด {_pct_heavier}%</div>',
+                unsafe_allow_html=True)
 
     # ════════════════════════════════════════════════════════════════
     # 6️⃣  🌙 เคสนอกเวลา (สะสม)
