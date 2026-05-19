@@ -1511,104 +1511,265 @@ def _render_historical_analytics(date_from: str, date_to: str):
     st.markdown('<div class="group-header purple">📈 แนวโน้มเวลา</div>',
                 unsafe_allow_html=True)
 
-    # 📅 Calendar Heatmap (แบบ GitHub) — แทน daily bar เดิม
-    st.markdown('<div class="sub-title">📅 จำนวนเคสรายวัน (Calendar Heatmap)</div>',
+    # 📅 รายเดือน — Monthly trend (main view) + KPI cards + expander Heatmap
+    st.markdown('<div class="sub-title">📅 จำนวนเคสรายเดือน</div>',
                 unsafe_allow_html=True)
     daily = data['daily_total']
     if not daily.empty:
-        # เตรียม daily count
+        # เตรียม monthly aggregation
         _daily_h = daily.copy()
         _daily_h['op_date'] = _daily_h['op_date'].astype(str)
-        # Stat summary
-        _max_n = int(_daily_h['n_cases'].max())
-        _max_date = _daily_h.loc[_daily_h['n_cases'].idxmax(), 'op_date']
-        _max_date_th = pd.to_datetime(_max_date).strftime('%d/%m/%Y')
-        _avg_per_day = round(_daily_h['n_cases'].mean(), 1)
+        _daily_h['_dt'] = pd.to_datetime(_daily_h['op_date'])
+        _daily_h['month'] = _daily_h['_dt'].dt.strftime('%Y-%m')
 
-        # เติม full date range เพื่อให้เห็นวันที่ไม่มีเคส (เป็น 0)
-        _full_dates = pd.date_range(date_from, date_to)
-        _cal_df = pd.DataFrame({'_dt': _full_dates})
-        _cal_df['op_date'] = _cal_df['_dt'].dt.strftime('%Y-%m-%d')
-        _cal_df = _cal_df.merge(
-            _daily_h[['op_date', 'n_cases']], on='op_date', how='left').fillna(0)
-        _cal_df['n_cases'] = _cal_df['n_cases'].astype(int)
-        _cal_df['dow'] = _cal_df['_dt'].dt.dayofweek  # 0=Mon
-        _cal_df['week_start'] = _cal_df['_dt'] - pd.to_timedelta(
-            _cal_df['dow'], unit='D')
+        _monthly = _daily_h.groupby('month').agg(
+            total=('n_cases', 'sum'),
+            n_days=('op_date', 'count'),
+        ).reset_index().sort_values('month')
 
-        # Pivot: rows=dow (จ-อา), cols=week_start
-        _pivot = (_cal_df.pivot(index='dow', columns='week_start',
-                                values='n_cases').fillna(0).astype(int))
-        _pivot = _pivot.reindex(range(7), fill_value=0)
-        _week_labels = [pd.to_datetime(w).strftime('%d/%m')
-                        for w in _pivot.columns]
-        _THAI_DAY_SHORT = ['จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส', 'อา']
-        _dow_labels = [_THAI_DAY_SHORT[i] for i in _pivot.index]
+        _THAI_M = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+                   'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+        _monthly['month_th'] = _monthly['month'].apply(
+            lambda x: _THAI_M[int(x.split('-')[1])])
 
-        # Custom hover text
-        _hover_text = []
-        for dow_idx in _pivot.index:
-            row_text = []
-            for week_start in _pivot.columns:
-                _actual_date = pd.to_datetime(week_start) + pd.Timedelta(
-                    days=int(dow_idx))
-                _date_str = _actual_date.strftime('%d/%m/%Y')
-                _cnt = _pivot.loc[dow_idx, week_start]
-                row_text.append(
-                    f'{_date_str} (วัน{_THAI_DAY_SHORT[dow_idx]})<br>'
-                    f'{int(_cnt)} เคส')
-            _hover_text.append(row_text)
+        # 📊 Stats
+        _total_all = int(_monthly['total'].sum())
+        _peak_idx = _monthly['total'].idxmax()
+        _peak_month = _monthly.loc[_peak_idx, 'month_th']
+        _peak_count = int(_monthly.loc[_peak_idx, 'total'])
 
-        fig_cal = go.Figure(data=go.Heatmap(
-            z=_pivot.values,
-            x=_week_labels,
-            y=_dow_labels,
-            text=_hover_text,
-            hovertemplate='%{text}<extra></extra>',
-            colorscale=[
-                [0.0, '#ebedf0'],
-                [0.001, '#d4e6f7'],
-                [0.25, '#9ec8eb'],
-                [0.5, '#4fa3d6'],
-                [0.75, '#1976d2'],
-                [1.0, '#0d47a1'],
-            ],
-            xgap=2, ygap=2,
-            colorbar=dict(title=dict(text='เคส', font=dict(size=11)),
-                          thickness=12, len=0.8),
-            zmin=0,
+        # Trend (last 2 months)
+        if len(_monthly) >= 2:
+            _last = int(_monthly.iloc[-1]['total'])
+            _prev = int(_monthly.iloc[-2]['total'])
+            if _last < _prev:
+                _trend_label = '▼ ลด'
+                _trend_color = '#2e7d32'
+                _trend_bg = '#e8f5e9'
+                _trend_text_color = '#1b5e20'
+            elif _last > _prev:
+                _trend_label = '▲ เพิ่ม'
+                _trend_color = '#c62828'
+                _trend_bg = '#ffebee'
+                _trend_text_color = '#b71c1c'
+            else:
+                _trend_label = '▬ คงที่'
+                _trend_color = '#757575'
+                _trend_bg = '#f5f5f5'
+                _trend_text_color = '#424242'
+            _trend_sub = (
+                f"{_monthly.iloc[-2]['month_th']}→{_monthly.iloc[-1]['month_th']}"
+            )
+        else:
+            _trend_label = '—'
+            _trend_color = '#757575'
+            _trend_bg = '#f5f5f5'
+            _trend_text_color = '#424242'
+            _trend_sub = 'ข้อมูลไม่พอ'
+
+        # 🎴 3 KPI cards (รวม · เดือนเยอะสุด · แนวโน้ม)
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            st.markdown(
+                f'<div style="background:#e3f2fd;border-radius:10px;'
+                f'padding:14px 16px;border-left:5px solid #1976d2;">'
+                f'<div style="font-size:12px;color:#1565c0;">รวมทั้งช่วง</div>'
+                f'<div style="font-size:32px;font-weight:600;color:#0d47a1;'
+                f'line-height:1;margin:4px 0;">{_total_all:,}</div>'
+                f'<div style="font-size:11px;color:#1565c0;">เคส</div>'
+                f'</div>', unsafe_allow_html=True)
+        with k2:
+            st.markdown(
+                f'<div style="background:#ffebee;border-radius:10px;'
+                f'padding:14px 16px;border-left:5px solid #c62828;">'
+                f'<div style="font-size:12px;color:#b71c1c;">เดือนเยอะสุด</div>'
+                f'<div style="font-size:32px;font-weight:600;color:#c62828;'
+                f'line-height:1;margin:4px 0;">{_peak_month}</div>'
+                f'<div style="font-size:11px;color:#b71c1c;">'
+                f'{_peak_count} เคส</div>'
+                f'</div>', unsafe_allow_html=True)
+        with k3:
+            st.markdown(
+                f'<div style="background:{_trend_bg};border-radius:10px;'
+                f'padding:14px 16px;border-left:5px solid {_trend_color};">'
+                f'<div style="font-size:12px;color:{_trend_text_color};">'
+                f'แนวโน้มล่าสุด</div>'
+                f'<div style="font-size:32px;font-weight:600;'
+                f'color:{_trend_color};line-height:1;margin:4px 0;">'
+                f'{_trend_label}</div>'
+                f'<div style="font-size:11px;color:{_trend_text_color};">'
+                f'{_trend_sub}</div>'
+                f'</div>', unsafe_allow_html=True)
+
+        # 📈 Monthly line chart (5 จุดใหญ่ + peak ★)
+        # ขยาย y-range เผื่อ label "164 ★" ไม่ตกกรอบบน
+        _y_max_m = max(int(_monthly['total'].max()) * 1.45, 10)
+        _marker_colors = [
+            '#c62828' if v == _peak_count else '#1976d2'
+            for v in _monthly['total']
+        ]
+        _marker_sizes = [
+            14 if v == _peak_count else 10
+            for v in _monthly['total']
+        ]
+        _text_labels = [
+            f"{v} ★" if v == _peak_count else f"{v}"
+            for v in _monthly['total']
+        ]
+        fig_m_main = go.Figure()
+        fig_m_main.add_trace(go.Scatter(
+            x=_monthly['month_th'], y=_monthly['total'],
+            mode='lines+markers+text',
+            line=dict(color='#1976d2', width=3),
+            marker=dict(size=_marker_sizes, color=_marker_colors,
+                        line=dict(width=2, color='white')),
+            text=_text_labels,
+            textposition='top center',
+            textfont=dict(size=14, color='#0d47a1'),
+            fill='tozeroy',
+            fillcolor='rgba(25, 118, 210, 0.10)',
+            hovertemplate='<b>%{x}</b><br>%{y} เคส<extra></extra>',
+            cliponaxis=False,  # ไม่ตัด label เมื่อชน edge
         ))
-        fig_cal.update_layout(
-            margin=dict(t=20, b=40, l=30, r=10),
-            height=220,
-            xaxis=dict(tickangle=-45, side='top',
-                       tickfont=dict(size=10),
-                       title=dict(text='สัปดาห์ (จันทร์)', font=dict(size=10))),
-            yaxis=dict(autorange='reversed', tickfont=dict(size=11)),
+        fig_m_main.update_layout(
+            margin=dict(t=70, b=30, l=50, r=20), height=320,
+            xaxis=dict(title='', tickfont=dict(size=14)),
+            yaxis=dict(title='จำนวนเคส', range=[0, _y_max_m],
+                       gridcolor='#eceff1'),
+            showlegend=False,
             plot_bgcolor='white',
         )
+        st.plotly_chart(fig_m_main, use_container_width=True)
+        st.caption(
+            "💡 จุดแดง ★ = เดือนที่เคสเยอะสุด · "
+            "พื้นที่ฟ้าอ่อน = ระดับเคส · "
+            "hover ดูจำนวนเคส")
 
-        col_h1, col_h2 = st.columns([3, 1])
-        with col_h1:
-            st.plotly_chart(fig_cal, use_container_width=True)
-            st.caption(
-                "🟦 สี่เหลี่ยม = วันหนึ่ง · สีเข้ม = เคสเยอะ · "
-                "สีเทา = ไม่มีเคส · hover ดูจำนวน")
-        with col_h2:
+        # ⤵️ ซ่อน Calendar Heatmap ใน expander — แยกเดือน + wk 1-4
+        with st.expander("📅 ดูรายวันละเอียด (Calendar Heatmap แยกเดือน)"):
+            # Stat summary daily
+            _max_n_d = int(_daily_h['n_cases'].max())
+            _max_date_d = _daily_h.loc[_daily_h['n_cases'].idxmax(), 'op_date']
+            _max_date_th_d = pd.to_datetime(_max_date_d).strftime('%d/%m/%Y')
+            _avg_per_day_d = round(_daily_h['n_cases'].mean(), 1)
+
+            # เติม full date range
+            _full_dates = pd.date_range(date_from, date_to)
+            _cal_df = pd.DataFrame({'_dt': _full_dates})
+            _cal_df['op_date'] = _cal_df['_dt'].dt.strftime('%Y-%m-%d')
+            _cal_df = _cal_df.merge(
+                _daily_h[['op_date', 'n_cases']], on='op_date',
+                how='left').fillna(0)
+            _cal_df['n_cases'] = _cal_df['n_cases'].astype(int)
+            _cal_df['dow'] = _cal_df['_dt'].dt.dayofweek  # 0=Mon
+            _cal_df['month_str'] = _cal_df['_dt'].dt.strftime('%Y-%m')
+            _cal_df['day_of_month'] = _cal_df['_dt'].dt.day
+            _cal_df['week_of_month'] = (
+                (_cal_df['day_of_month'] - 1) // 7 + 1)  # 1-5
+
+            # หา peak month
+            _month_totals = _cal_df.groupby('month_str')['n_cases'].sum()
+            _peak_month_str = _month_totals.idxmax()
+            _global_max = int(_cal_df['n_cases'].max())  # color scale shared
+
+            # หา list ของเดือนใน range
+            _months_in_range = sorted(_cal_df['month_str'].unique())
+            _THAI_DAY_SHORT_5 = ['จ', 'อ', 'พ', 'พฤ', 'ศ']
+            _THAI_M_FULL = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.',
+                            'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.',
+                            'ธ.ค.']
+
+            # 🎴 หนึ่ง mini-heatmap ต่อเดือน — Streamlit columns
+            _cols_per_row = min(len(_months_in_range), 5)
+            month_cols = st.columns(_cols_per_row)
+            for idx, m_str in enumerate(_months_in_range):
+                with month_cols[idx % _cols_per_row]:
+                    _m_data = _cal_df[_cal_df['month_str'] == m_str]
+                    _m_num = int(m_str.split('-')[1])
+                    _m_th = _THAI_M_FULL[_m_num]
+                    _is_peak = (m_str == _peak_month_str)
+                    _m_total = int(_m_data['n_cases'].sum())
+
+                    # Pivot: dow (จ-ศ only) × week_of_month
+                    _m_pivot = (_m_data[_m_data['dow'].between(0, 4)]
+                                .pivot_table(index='dow',
+                                             columns='week_of_month',
+                                             values='n_cases',
+                                             fill_value=0,
+                                             aggfunc='sum'))
+                    _m_pivot = _m_pivot.reindex(index=range(5),
+                                                columns=range(1, 6),
+                                                fill_value=0)
+
+                    # Title (red if peak, blue otherwise)
+                    _title_bg = '#ffebee' if _is_peak else '#e3f2fd'
+                    _title_color = '#c62828' if _is_peak else '#0d47a1'
+                    _title_text = (f'{_m_th} ★ ({_m_total})' if _is_peak
+                                   else f'{_m_th} ({_m_total})')
+                    st.markdown(
+                        f'<div style="text-align:center;font-size:13px;'
+                        f'font-weight:600;color:{_title_color};'
+                        f'background:{_title_bg};padding:6px;'
+                        f'border-radius:6px;margin-bottom:6px;">'
+                        f'{_title_text}</div>',
+                        unsafe_allow_html=True)
+
+                    # สร้าง hover text
+                    _hover_m = []
+                    for dow_idx in range(5):
+                        row_text = []
+                        for wk in range(1, 6):
+                            _cnt = int(_m_pivot.loc[dow_idx, wk])
+                            row_text.append(
+                                f'{_m_th} W{wk} วัน{_THAI_DAY_SHORT_5[dow_idx]}'
+                                f'<br>{_cnt} เคส')
+                        _hover_m.append(row_text)
+
+                    # Heatmap (ใช้ shared color scale [0, global_max])
+                    fig_mh = go.Figure(data=go.Heatmap(
+                        z=_m_pivot.values,
+                        x=[f'W{w}' for w in range(1, 6)],
+                        y=_THAI_DAY_SHORT_5,
+                        text=_hover_m,
+                        hovertemplate='%{text}<extra></extra>',
+                        colorscale=[
+                            [0.0, '#ebedf0'],
+                            [0.001, '#d4e6f7'],
+                            [0.25, '#9ec8eb'],
+                            [0.5, '#4fa3d6'],
+                            [0.75, '#1976d2'],
+                            [1.0, '#0d47a1'],
+                        ],
+                        xgap=2, ygap=2,
+                        showscale=False,
+                        zmin=0, zmax=max(_global_max, 1),
+                    ))
+                    fig_mh.update_layout(
+                        margin=dict(t=5, b=20, l=20, r=5),
+                        height=180,
+                        xaxis=dict(side='top', tickfont=dict(size=10),
+                                   showgrid=False),
+                        yaxis=dict(autorange='reversed',
+                                   tickfont=dict(size=10),
+                                   showgrid=False),
+                        plot_bgcolor='white',
+                    )
+                    st.plotly_chart(fig_mh, use_container_width=True)
+
+            # การ์ดสรุป peak day (รายวัน) + caption
             st.markdown(
                 f'<div style="background:#fff3e0;border-radius:10px;'
-                f'padding:14px;border-left:4px solid #c62828;">'
-                f'<div style="font-size:11px;color:#bf360c;font-weight:500;">'
-                f'📈 วันที่เคสเยอะสุด</div>'
-                f'<div style="font-size:32px;font-weight:500;color:#c62828;'
-                f'line-height:1;margin:6px 0;">{_max_n}</div>'
-                f'<div style="font-size:11px;color:#bf360c;">'
-                f'เคส · {_max_date_th}</div>'
-                f'<div style="border-top:1px solid #ffcc80;margin:8px 0;'
-                f'padding-top:8px;font-size:10px;color:#5d4037;">เฉลี่ย/วัน</div>'
-                f'<div style="font-size:20px;font-weight:500;color:#5d4037;'
-                f'line-height:1;">{_avg_per_day}</div>'
-                f'</div>', unsafe_allow_html=True)
+                f'padding:10px 14px;border-left:4px solid #c62828;'
+                f'margin-top:8px;">'
+                f'<span style="font-size:13px;color:#bf360c;">'
+                f'<b>📈 วันที่เคสเยอะสุด:</b> {_max_n_d} เคส · '
+                f'วันที่ {_max_date_th_d} · '
+                f'เฉลี่ย/วัน {_avg_per_day_d} เคส</span></div>',
+                unsafe_allow_html=True)
+            st.caption(
+                "🟦 cell = วันหนึ่ง · สีเข้ม = เคสเยอะ · "
+                "สีเทา = ไม่มีเคส · W1–W5 = สัปดาห์ที่ 1–5 ของเดือน · "
+                "title แดง★ = เดือน peak")
     else:
         st.caption("ยังไม่มีข้อมูลรายวัน")
 
