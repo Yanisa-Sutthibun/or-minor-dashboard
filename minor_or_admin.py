@@ -1353,10 +1353,192 @@ def _render_historical_analytics(date_from: str, date_to: str):
         st.info("ยังไม่มีข้อมูลเคสที่เสร็จแล้วในช่วงนี้ — เริ่มใช้งานแล้วสถิติจะสะสมอัตโนมัติ")
         return
 
+    # 📑 Sticky sidebar TOC (Notion-style) — fixed มุมขวา + smooth scroll + collapse
+    import streamlit.components.v1 as _hist_components
+    _hist_components.html("""
+    <script>
+    (function() {
+        const parent = window.parent.document;
+        // ลบของเดิมก่อน (กรณี rerun)
+        ['hist-toc', 'hist-toc-mini'].forEach(id => {
+            const old = parent.getElementById(id);
+            if (old) old.remove();
+        });
+
+        // อ่านสถานะ collapsed จาก sessionStorage
+        const isCollapsed = window.parent.sessionStorage.getItem(
+            'hist_toc_collapsed') === '1';
+
+        // 🔽 TOC แบบเต็ม
+        const TOC_HTML = `
+        <div id="hist-toc" style="
+            position: fixed; right: 20px; top: 120px; width: 220px;
+            background: white; border: 0.5px solid #e0e0e0;
+            border-radius: 10px; padding: 14px 12px;
+            font-family: 'Sarabun', sans-serif; font-size: 13px;
+            z-index: 999; max-height: 75vh; overflow-y: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            display: ${isCollapsed ? 'none' : 'block'};">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:0 6px;">
+            <span style="font-size:10px;color:#757575;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
+              📑 ไปที่ section
+            </span>
+            <span id="toc-minimize" title="ย่อหน้าต่าง" style="cursor:pointer;color:#9e9e9e;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px;user-select:none;">−</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <a class="toc-item" data-target="sec-kpi" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">1</span>🎯 KPI Highlights</a>
+            <a class="toc-item" data-target="sec-sum" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">2</span>📋 สรุปยอดสะสม</a>
+            <a class="toc-item" data-target="sec-trend" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">3</span>📈 แนวโน้มเวลา</a>
+            <a class="toc-item" data-target="sec-rank" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">4</span>🏆 อันดับยอดนิยม</a>
+            <a class="toc-item" data-target="sec-eff" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">5</span>⏱️ ประสิทธิภาพ</a>
+            <a class="toc-item" data-target="sec-night" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">6</span>🌙 นอกเวลา</a>
+            <a class="toc-item" data-target="sec-nurse" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">7</span>👥 Progress (PIN)</a>
+            <a class="toc-item" data-target="sec-export" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">8</span>💾 Export</a>
+          </div>
+          <div style="border-top:0.5px solid #eceff1;margin-top:10px;padding-top:10px;">
+            <a id="toc-top" style="display:flex;align-items:center;gap:6px;font-size:12px;padding:6px 10px;border-radius:6px;color:#1976d2;text-decoration:none;cursor:pointer;">⬆ กลับด้านบน</a>
+          </div>
+        </div>`;
+
+        // 🔼 TOC แบบย่อ (ปุ่มเล็กกลม)
+        const MINI_HTML = `
+        <div id="hist-toc-mini" title="เปิด TOC" style="
+            position: fixed; right: 20px; top: 120px;
+            width: 44px; height: 44px; border-radius: 50%;
+            background: white; border: 0.5px solid #e0e0e0;
+            display: ${isCollapsed ? 'flex' : 'none'};
+            align-items: center; justify-content: center;
+            cursor: pointer; z-index: 999;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            font-size: 20px; user-select: none;">📑</div>`;
+
+        parent.body.insertAdjacentHTML('beforeend', TOC_HTML);
+        parent.body.insertAdjacentHTML('beforeend', MINI_HTML);
+
+        // 🎯 Smooth scroll handler
+        function scrollToSection(id) {
+            const target = parent.getElementById(id);
+            if (target) {
+                target.scrollIntoView({behavior: 'smooth', block: 'start'});
+            }
+        }
+        parent.querySelectorAll('#hist-toc .toc-item').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                scrollToSection(a.getAttribute('data-target'));
+            });
+            a.addEventListener('mouseenter', () => {
+                if (!a.classList.contains('active'))
+                    a.style.background = '#f5f5f5';
+            });
+            a.addEventListener('mouseleave', () => {
+                if (!a.classList.contains('active'))
+                    a.style.background = 'transparent';
+            });
+        });
+
+        // ⬆ Back-to-top — ใช้ scrollIntoView ของ section แรก (เชื่อถือได้กว่า)
+        const topBtn = parent.getElementById('toc-top');
+        if (topBtn) {
+            topBtn.addEventListener('click', () => {
+                // ลองหลายวิธี - Streamlit version ต่างกัน
+                const first = parent.getElementById('sec-kpi');
+                if (first) {
+                    first.scrollIntoView({behavior: 'smooth', block: 'start'});
+                } else {
+                    // Fallback selectors
+                    const sels = ['section.main', '[data-testid="stMain"]',
+                                  '[data-testid="stAppViewContainer"]',
+                                  'div.main', 'main'];
+                    for (const s of sels) {
+                        const el = parent.querySelector(s);
+                        if (el && el.scrollTo) {
+                            el.scrollTo({top: 0, behavior: 'smooth'});
+                            return;
+                        }
+                    }
+                    window.parent.scrollTo({top: 0, behavior: 'smooth'});
+                }
+            });
+            topBtn.addEventListener('mouseenter', () => {
+                topBtn.style.background = '#e3f2fd';
+            });
+            topBtn.addEventListener('mouseleave', () => {
+                topBtn.style.background = 'transparent';
+            });
+        }
+
+        // 🔽 Minimize → ซ่อน TOC แสดง mini button
+        const minBtn = parent.getElementById('toc-minimize');
+        const tocBox = parent.getElementById('hist-toc');
+        const miniBtn = parent.getElementById('hist-toc-mini');
+        if (minBtn) {
+            minBtn.addEventListener('click', () => {
+                tocBox.style.display = 'none';
+                miniBtn.style.display = 'flex';
+                window.parent.sessionStorage.setItem('hist_toc_collapsed', '1');
+            });
+            minBtn.addEventListener('mouseenter', () => {
+                minBtn.style.background = '#f5f5f5';
+                minBtn.style.color = '#424242';
+            });
+            minBtn.addEventListener('mouseleave', () => {
+                minBtn.style.background = 'transparent';
+                minBtn.style.color = '#9e9e9e';
+            });
+        }
+        // 🔼 Mini button → ขยาย TOC กลับ
+        if (miniBtn) {
+            miniBtn.addEventListener('click', () => {
+                tocBox.style.display = 'block';
+                miniBtn.style.display = 'none';
+                window.parent.sessionStorage.setItem('hist_toc_collapsed', '0');
+            });
+            miniBtn.addEventListener('mouseenter', () => {
+                miniBtn.style.transform = 'scale(1.08)';
+            });
+            miniBtn.addEventListener('mouseleave', () => {
+                miniBtn.style.transform = 'scale(1.0)';
+            });
+        }
+
+        // Active state via IntersectionObserver
+        const sections = ['sec-kpi','sec-sum','sec-trend','sec-rank',
+                          'sec-eff','sec-night','sec-nurse','sec-export'];
+        const sectionEls = sections.map(id => parent.getElementById(id))
+                                    .filter(x => x);
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    parent.querySelectorAll('#hist-toc .toc-item').forEach(a => {
+                        a.classList.remove('active');
+                        a.style.background = 'transparent';
+                        a.style.color = '#455a64';
+                        a.style.fontWeight = '400';
+                        a.style.borderLeft = 'none';
+                    });
+                    const active = parent.querySelector(
+                        `#hist-toc .toc-item[data-target="${entry.target.id}"]`);
+                    if (active) {
+                        active.classList.add('active');
+                        active.style.background = '#f3e5f5';
+                        active.style.color = '#4a148c';
+                        active.style.fontWeight = '600';
+                        active.style.borderLeft = '3px solid #6a1b9a';
+                        active.style.paddingLeft = '7px';
+                    }
+                }
+            });
+        }, {threshold: 0.2, rootMargin: '-80px 0px -50% 0px'});
+        sectionEls.forEach(el => observer.observe(el));
+    })();
+    </script>
+    """, height=0)
+
     # ════════════════════════════════════════════════════════════════
     # 1️⃣  🎯 KPI HIGHLIGHTS — เลขสำคัญที่กรรมการต้องเห็นก่อน
     # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header">🎯 KPI Highlights</div>',
+    st.markdown('<div id="sec-kpi" class="group-header">🎯 KPI Highlights</div>',
                 unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -1413,7 +1595,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
     # ════════════════════════════════════════════════════════════════
     # 2️⃣  📋 สรุปยอดสะสม — categorical breakdowns
     # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header green">📋 สรุปยอดสะสม</div>',
+    st.markdown('<div id="sec-sum" class="group-header green">📋 สรุปยอดสะสม</div>',
                 unsafe_allow_html=True)
     s_all = get_summary(date_from=date_from, date_to=date_to)
 
@@ -1510,7 +1692,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
     # ════════════════════════════════════════════════════════════════
     # 3️⃣  📈 แนวโน้มเวลา — เคสรายวัน + heatmap (เห็น pattern)
     # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header purple">📈 แนวโน้มเวลา</div>',
+    st.markdown('<div id="sec-trend" class="group-header purple">📈 แนวโน้มเวลา</div>',
                 unsafe_allow_html=True)
 
     # 📅 รายเดือน — Monthly trend (main view) + KPI cards + expander Heatmap
@@ -2008,7 +2190,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
     # Header + Toggle V/H ขวาบน (default = แนวตั้ง)
     _hdr_l, _hdr_r = st.columns([3, 1])
     with _hdr_l:
-        st.markdown('<div class="group-header orange">🏆 อันดับยอดนิยม</div>',
+        st.markdown('<div id="sec-rank" class="group-header orange">🏆 อันดับยอดนิยม</div>',
                     unsafe_allow_html=True)
     with _hdr_r:
         st.markdown('<div style="height:24px;"></div>', unsafe_allow_html=True)
@@ -2254,7 +2436,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
     # ════════════════════════════════════════════════════════════════
     # 5️⃣  ⏱️ ประสิทธิภาพการให้บริการ — เวลารอ + รับเวร + Turnover
     # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header teal">⏱️ ประสิทธิภาพการให้บริการ</div>',
+    st.markdown('<div id="sec-eff" class="group-header teal">⏱️ ประสิทธิภาพการให้บริการ</div>',
                 unsafe_allow_html=True)
     with st.expander("💡 อธิบายส่วนนี้", expanded=False):
         st.markdown("""
@@ -2512,7 +2694,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
     # ════════════════════════════════════════════════════════════════
     # 6️⃣  🌙 เคสนอกเวลา (สะสม)
     # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header indigo">🌙 เคสนอกเวลา (สะสม)</div>',
+    st.markdown('<div id="sec-night" class="group-header indigo">🌙 เคสนอกเวลา (สะสม)</div>',
                 unsafe_allow_html=True)
     df_range = get_cases()
     df_range = df_range[
@@ -2533,7 +2715,8 @@ def _render_historical_analytics(date_from: str, date_to: str):
     # ════════════════════════════════════════════════════════════════
     # 6.5️⃣  👥 Progress รายบุคคล (PIN-protected) — ย้ายมาหลัง เคสนอกเวลา
     # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header" style="color:#5e35b1;background:#ede7f6;'
+    st.markdown('<div id="sec-nurse" class="group-header" '
+                'style="color:#5e35b1;background:#ede7f6;'
                 'border-left-color:#5e35b1;">👥 Progress รายบุคคล</div>',
                 unsafe_allow_html=True)
     with st.expander("💡 อธิบายส่วนนี้", expanded=False):
@@ -2548,7 +2731,8 @@ def _render_historical_analytics(date_from: str, date_to: str):
     # ════════════════════════════════════════════════════════════════
     # 7️⃣  💾 Export ข้อมูล
     # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header" style="color:#546e7a;background:#eceff1;'
+    st.markdown('<div id="sec-export" class="group-header" '
+                'style="color:#546e7a;background:#eceff1;'
                 'border-left-color:#546e7a;">💾 Export ข้อมูล</div>',
                 unsafe_allow_html=True)
     st.caption("ดาวน์โหลดข้อมูลสำหรับผู้บริหารหรือวิทยานิพนธ์")
