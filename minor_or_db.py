@@ -250,6 +250,28 @@ def clear_all_cases() -> int:
         conn.close()
 
 
+def clear_cases_by_date_range(date_from: str, date_to: str) -> int:
+    """ลบเคสในช่วงวันที่ที่ระบุ — return จำนวนเคสที่ลบ
+
+    Args:
+        date_from, date_to: 'YYYY-MM-DD' (inclusive)
+
+    ไม่แตะ audit_log / room_settings — ลบแค่ cases ในช่วงเวลานั้น
+    """
+    conn = get_conn()
+    try:
+        n = conn.execute(
+            "SELECT COUNT(*) FROM cases WHERE op_date BETWEEN ? AND ?",
+            (date_from, date_to)).fetchone()[0]
+        conn.execute(
+            "DELETE FROM cases WHERE op_date BETWEEN ? AND ?",
+            (date_from, date_to))
+        conn.commit()
+        return int(n)
+    finally:
+        conn.close()
+
+
 def clear_all_data() -> dict:
     """ลบข้อมูลทุกอย่างในทุก table (clean wipe) — return จำนวนแต่ละ table
 
@@ -1025,6 +1047,14 @@ def import_schedule(df: pd.DataFrame, op_date: str) -> int:
                 conn.execute(
                     "UPDATE cases SET diagnosis=? WHERE case_id=? AND (diagnosis IS NULL OR diagnosis='')",
                     (_diag_tmp, existing[0])
+                )
+            # 🆕 Update scheduled_surgeon จาก CSV เสมอ (fix migration backfill)
+            # — re-upload schedule จะ overwrite ค่าที่ผิดของเดิม
+            _sched_surg_new = (data.get('surgeon_name') or '').strip()
+            if _sched_surg_new and _sched_surg_new.upper() not in ('NAN', 'NONE'):
+                conn.execute(
+                    "UPDATE cases SET scheduled_surgeon=? WHERE case_id=?",
+                    (_sched_surg_new, existing[0])
                 )
             continue
 
@@ -2245,15 +2275,20 @@ def get_surgeon_list(date_from: str = None, date_to: str = None,
              .reset_index(name='n_delegated'))
     n_del.columns = ['surgeon', 'n_delegated']
 
-    # Merge
+    # Merge (outer = แสดงทั้งฝั่ง schedule + intraop แม้ไม่ตรงกัน)
     out = n_sched.merge(n_actual, on='surgeon', how='outer')
     out = out.merge(n_del, on='surgeon', how='outer')
     out = out.fillna(0)
     for c in ['n_scheduled', 'n_actual', 'n_delegated']:
         out[c] = out[c].astype(int)
-    # เรียง
+    # เพิ่ม column สำหรับเรียง — ใช้ค่าที่มากกว่าระหว่าง 2 ฝั่ง
+    # → ผู้ที่ set 100/actual 0 จะอยู่ลำดับสูงเสมอ
+    out['_sort_key'] = out[['n_scheduled', 'n_actual']].max(axis=1)
+    # secondary sort: ตามที่ user เลือก
     sort_col = 'n_scheduled' if sort_by == 'scheduled' else 'n_actual'
-    out = out.sort_values(sort_col, ascending=False).reset_index(drop=True)
+    out = out.sort_values(['_sort_key', sort_col],
+                          ascending=[False, False]).reset_index(drop=True)
+    out = out.drop(columns=['_sort_key'])
     # ตัดแถวที่ scheduled=0 AND actual=0
     out = out[(out['n_scheduled'] > 0) | (out['n_actual'] > 0)]
     return out
@@ -2324,13 +2359,20 @@ def _normalize_proxy_for_surgeon(name) -> str:
     import re as _re
     _TITLE_RE = _re.compile(
         r'^\s*(?:ว่าที่\s*)?'
-        r'(?:พล\.?ต\.?[อทต]\.?|พ\.?ต\.?[อทต]\.?|ร\.?ต\.?[อทต]\.?|ด\.?ต\.?|'
+        # Compound civilian (LONG first)
+        r'(?:นายแพทย์|ทันตแพทย์|เภสัชกรหญิง|เภสัชกรชาย|เภสัชกร|'
+        r'แพทย์หญิง|แพทย์ชาย|แพทย์|'
+        # ตำรวจ
+        r'พล\.?ต\.?[อทต]\.?|พ\.?ต\.?[อทต]\.?|ร\.?ต\.?[อทต]\.?|ด\.?ต\.?|'
         r'จ\.?ส\.?ต\.?|จ\.?ส\.?[อทต]\.?|ส\.?ต\.?[อทต]\.?|'
+        # ทหาร
         r'พล\.?[อทต]\.?|พล\.?จ\.?|พ\.?[อทต]\.?|ร\.?[อทต]\.?|'
-        r'นาย|นาง|นางสาว|น\.?ส\.?|'
+        # พลเรือน (นางสาว ก่อน นาย+นาง)
+        r'นางสาว|นาย|นาง|น\.?ส\.?|'
         r'เด็กชาย|เด็กหญิง|ด\.?ช\.?|ด\.?ญ\.?|'
-        r'แพทย์หญิง|แพทย์ชาย|นพ\.?|พญ\.?|'
-        r'ดร\.?|ผศ\.?|รศ\.?|ศ\.?)\s*(?:หญิง|ชาย)?\s+')
+        # ตัวย่อ
+        r'นพ\.?|พญ\.?|ดร\.?|ผศ\.?|รศ\.?|ศ\.?)'
+        r'\s*(?:หญิง|ชาย)?\s*')   # \s+ → \s*
     prev = None
     while prev != s:
         prev = s

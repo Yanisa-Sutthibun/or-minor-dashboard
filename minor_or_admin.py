@@ -1039,6 +1039,9 @@ _NURSE_TITLE_RE = re.compile(
     r'^\s*'
     r'(?:ว่าที่\s*)?'      # ว่าที่ (ก่อนยศ)
     r'(?:'
+    # Compound civilian (LONG first — alternation is left-to-right)
+    r'นายแพทย์|ทันตแพทย์|เภสัชกรหญิง|เภสัชกรชาย|เภสัชกร|'
+    r'แพทย์หญิง|แพทย์ชาย|แพทย์|'
     # ตำรวจ
     r'พล\.?ต\.?[อทต]\.?|'      # พล.ต.อ./ท/ต
     r'พ\.?ต\.?[อทต]\.?|'        # พ.ต.อ./ท/ต
@@ -1050,14 +1053,13 @@ _NURSE_TITLE_RE = re.compile(
     r'พล\.?[อทต]\.?|พล\.?จ\.?|'
     r'พ\.?[อทต]\.?|'
     r'ร\.?[อทต]\.?|'
-    # พลเรือน
-    r'นาย|นาง|นางสาว|น\.?ส\.?|'
+    # พลเรือน — นางสาว ต้องอยู่ก่อน นาย+นาง
+    r'นางสาว|นาย|นาง|น\.?ส\.?|'
     r'เด็กชาย|เด็กหญิง|ด\.?ช\.?|ด\.?ญ\.?|'
-    # แพทย์/อาจารย์
-    r'แพทย์หญิง|แพทย์ชาย|นพ\.?|พญ\.?|'
-    r'ดร\.?|ผศ\.?|รศ\.?|ศ\.?'
+    # ตัวย่อแพทย์/อาจารย์
+    r'นพ\.?|พญ\.?|ดร\.?|ผศ\.?|รศ\.?|ศ\.?'
     r')'
-    r'\s*(?:หญิง|ชาย)?\s+'
+    r'\s*(?:หญิง|ชาย)?\s*'   # \s+ → \s* รองรับกรณีไม่มีช่องว่าง
 )
 
 
@@ -2906,7 +2908,7 @@ def page_admin():
             _render_historical_analytics(*st.session_state['hist_range'])
 
         # =========================================================
-        # Section: เครื่องมือจัดการข้อมูล (Maintenance tools)
+        # Section: เครื่องมือจัดการข้อมูล (Maintenance tools) — simplified
         # =========================================================
         st.markdown("---")
         st.markdown(
@@ -2916,414 +2918,190 @@ def page_admin():
             '<span style="font-size:18px;font-weight:700;color:#e65100;">'
             '🛠️ เครื่องมือจัดการข้อมูล (Maintenance)</span>'
             '<div style="font-size:12px;color:#bf360c;margin-top:4px;">'
-            'สำหรับ admin/หัวหน้าพยาบาล: import / แก้ไขข้อมูล / reset DB'
+            'สำหรับ admin/หัวหน้าพยาบาล: upload schedule + intraop / wipe DB'
             '</div></div>',
             unsafe_allow_html=True,
         )
 
         # =========================================================
-        # ① Cost-Driven Bulk Import (เครื่องมือเดียวรวมทุกอย่าง)
+        # ① 📅 Upload Schedule (.csv)
         # =========================================================
-        with st.expander(
-                "📦 ① Cost-Driven Bulk Import "
-                "(Cost Excel = master + enrich ด้วย sched + intraop)",
-                expanded=False):
+        with st.expander("📅 ① Upload Schedule (CSV)", expanded=False):
             st.caption(
-                "🎯 **เครื่องมือเดียวจบ** — Cost Excel เป็น master "
-                "(\"เคสที่ผ่าตัดจริง\") รวมข้อมูลจาก schedule + intraop "
-                "อัตโนมัติในการ import ครั้งเดียว:\n\n"
-                "✅ ทุก row ใน Cost Excel → 1 เคสใน DB\n"
-                "✅ case_category จาก reqdate ใน schedule (ถ้ามี)\n"
-                "✅ Room timestamps จาก intraop (ถ้ามี) "
-                "fallback ไป Op.start/end ใน Cost\n"
-                "✅ actual_duration จาก intraop opusetime > Cost Duration\n"
-                "✅ scrub/circ จาก intraop > Cost\n"
-                "✅ ค่าผ่าตัด, ค่าชิ้นเนื้อ จาก Cost\n"
-                "✅ status='discharged' (ทุกเคสในสมุดสถิติ = ผ่าตัดเสร็จ)\n\n"
-                "⏭️ เคสใน sched/intraop **ที่ไม่อยู่ใน Cost** จะถูก skip "
-                "(ถือว่า cancel หรือไม่ได้ผ่าตัดจริง)"
+                "🗓️ Upload **schedule.csv** จากระบบนัดผ่าตัด — "
+                "ระบบจะ insert/update เคสตาม `hn + opedate`\n\n"
+                "✅ บันทึก **scheduled_surgeon** (แพทย์ที่ set) — "
+                "ไม่ถูก overwrite ตอน upload intraop\n"
+                "✅ คอลัมน์ที่ต้องมี: `hn, opedate, dctnm, icd9cm_name, ...`"
             )
-            cd_cost = st.file_uploader(
-                "💰 Cost Excel (required) — สมุดสถิติ — มี HN, Date, "
-                "Operation, ราคาผ่าตัด, ราคาชิ้นเนื้อ, แพทย์, times",
-                type=['xlsx', 'xls'], key="cd_cost_xlsx",
+            sched_file = st.file_uploader(
+                "เลือกไฟล์ schedule (.csv)",
+                type=['csv'], key="maint_sched_upload",
             )
-            cd_sched = st.file_uploader(
-                "📅 Schedule CSV (optional) — เพิ่ม case_category, "
-                "diagnosis, division, age — มี hn, reqdate, opedate",
-                type=['csv'], key="cd_sched_csv",
-            )
-            cd_intra = st.file_uploader(
-                "🏥 Intraop CSV (optional) — เพิ่ม precise timestamps + "
-                "actual nurses — มี hn, opedate, roomtimein, roomtimeout",
-                type=['csv'], key="cd_intra_csv",
-            )
-
-            if cd_cost is not None:
-                cdb1, cdb2 = st.columns(2)
-                with cdb1:
-                    btn_cd_preview = st.button(
-                        "🔍 Preview (Dry-run)", use_container_width=True,
-                        key="btn_cd_preview")
-                with cdb2:
-                    btn_cd_apply = st.button(
-                        "✅ Import (อัพเดต DB)", type="primary",
-                        use_container_width=True, key="btn_cd_apply")
-
-                if btn_cd_preview or btn_cd_apply:
-                    import tempfile, os as _os
-                    tmp_paths = {}
-                    try:
-                        # Save uploaded files
-                        for upl, key, suffix in [
-                            (cd_cost, 'cost', '.xlsx'),
-                            (cd_sched, 'sched', '.csv'),
-                            (cd_intra, 'intra', '.csv'),
-                        ]:
-                            if upl is None:
-                                continue
-                            upl.seek(0)
-                            with tempfile.NamedTemporaryFile(
-                                    delete=False, suffix=suffix,
-                                    mode='wb') as tmp:
-                                tmp.write(upl.read())
-                                tmp_paths[key] = tmp.name
-
-                        from import_historical import import_cost_driven
-                        info = import_cost_driven(
-                            cost_path=tmp_paths['cost'],
-                            sched_path=tmp_paths.get('sched'),
-                            intra_path=tmp_paths.get('intra'),
-                            dry_run=not btn_cd_apply)
-
-                        if 'error' in info:
-                            st.error(f"❌ {info['error']}")
-                        else:
-                            mode = ("✅ Imported" if btn_cd_apply
-                                    else "🔍 Preview")
-                            st.success(
-                                f"{mode} — เพิ่ม **{info['inserted']} เคส**, "
-                                f"ข้าม {info['skipped_duplicate']} ซ้ำ"
-                            )
-                            st.markdown(
-                                f"**📊 ที่มาของข้อมูล (enrichment):**\n\n"
-                                f"- 📅 จาก Schedule: "
-                                f"{info['enriched_sched']} เคส "
-                                f"(ได้ reqdate + diag + division)\n"
-                                f"- 🏥 จาก Intraop: "
-                                f"{info['enriched_intra']} เคส "
-                                f"(ได้ precise timestamps)\n"
-                                f"- 💰 Cost-only (walk-in): "
-                                f"{info['inserted'] - info['enriched_intra']} เคส"
-                            )
-
-                            if (info['skipped_no_hn']
-                                    or info['skipped_no_date']):
-                                st.warning(
-                                    f"⚠️ Cost rows ที่ skip (ขาด HN/Date): "
-                                    f"HN missing {info['skipped_no_hn']}, "
-                                    f"Date missing {info['skipped_no_date']}"
-                                )
-
-                            # Cases ใน sched แต่ไม่ใน cost
-                            if info.get('sched_only_not_in_cost'):
-                                st.markdown(
-                                    f"**⏭️ เคสใน Schedule แต่ไม่ใน Cost "
-                                    f"({info['sched_only_not_in_cost']} เคส) "
-                                    f"— อาจ cancel:**"
-                                )
-                                if info['sched_only_samples']:
-                                    df_so = pd.DataFrame(
-                                        info['sched_only_samples'])
-                                    st.dataframe(df_so,
-                                                 use_container_width=True,
-                                                 hide_index=True)
-
-                            if info.get('samples'):
-                                st.markdown(
-                                    f"**ตัวอย่างเคสที่ import "
-                                    f"({len(info['samples'])} เคส):**"
-                                )
-                                df_s = pd.DataFrame(info['samples'])
-                                st.dataframe(df_s,
-                                             use_container_width=True,
-                                             hide_index=True)
-                            if btn_cd_apply:
-                                st.info(
-                                    "🔄 กดปุ่ม R เพื่อ refresh — "
-                                    "หรือเปิด tab \"📈 สถิติย้อนหลัง\""
-                                )
-                    except Exception as e:
-                        import traceback
-                        st.error(f"❌ Error: {e}")
-                        st.code(traceback.format_exc())
-                    finally:
-                        for p in tmp_paths.values():
-                            try: _os.unlink(p)
-                            except OSError: pass
-
-        # ── ② Reclassify / ③ Re-import timestamps / ⑤ Walk-in import
-        # — รวมเข้าใน ① Cost-Driven Bulk Import แล้ว (1 click จบงาน) ──
-        if False:  # dead code below — kept temporarily for reference
-            bulk_sched = st.file_uploader(
-                "📅 Schedule CSV (required) — มี hn, reqdate, opedate, "
-                "icd9cm_name, surgstfnm, division",
-                type=['csv'], key="bulk_sched_csv",
-            )
-            bulk_intra = st.file_uploader(
-                "🏥 Intraop CSV (required) — มี hn, opedate, **roomtimein**, "
-                "**roomtimeout**, arrivtime, opusetime",
-                type=['csv'], key="bulk_intra_csv",
-            )
-            bulk_cost = st.file_uploader(
-                "💰 Cost Excel (optional) — มี HN, Date, ราคาผ่าตัด, ราคาชิ้นเนื้อ",
-                type=['xlsx', 'xls'], key="bulk_cost_xlsx",
-            )
-
-            if bulk_sched and bulk_intra:
-                cb1, cb2 = st.columns(2)
-                with cb1:
-                    btn_bulk_preview = st.button(
-                        "🔍 Preview (Dry-run)", use_container_width=True,
-                        key="btn_bulk_preview")
-                with cb2:
-                    btn_bulk_import = st.button(
-                        "✅ Import (อัพเดต DB)", type="primary",
-                        use_container_width=True, key="btn_bulk_import")
-
-                if btn_bulk_preview or btn_bulk_import:
-                    import tempfile, os as _os
-                    tmp_paths = []
-                    try:
-                        # Save uploaded files to temp paths
-                        for upl, suffix in [(bulk_sched, '.csv'),
-                                            (bulk_intra, '.csv')]:
-                            upl.seek(0)
-                            with tempfile.NamedTemporaryFile(
-                                    delete=False, suffix=suffix,
-                                    mode='wb') as tmp:
-                                tmp.write(upl.read())
-                                tmp_paths.append(tmp.name)
-                        cost_path = None
-                        if bulk_cost:
-                            bulk_cost.seek(0)
-                            with tempfile.NamedTemporaryFile(
-                                    delete=False, suffix='.xlsx',
-                                    mode='wb') as tmp:
-                                tmp.write(bulk_cost.read())
-                                cost_path = tmp.name
-
-                        from import_historical import (
-                            import_historical_with_costs)
-                        info = import_historical_with_costs(
-                            tmp_paths[0], tmp_paths[1], cost_path,
-                            dry_run=not btn_bulk_import)
-
-                        mode = "✅ Imported" if btn_bulk_import else "🔍 Preview"
+            if sched_file is not None and st.button(
+                    "📥 Import Schedule", key="btn_maint_sched_import",
+                    type='primary'):
+                try:
+                    df_sched = _read_his_file(sched_file)
+                    st.write(f"📊 อ่านไฟล์ได้ **{len(df_sched)} rows**")
+                    # หา op_date จาก opedate column
+                    if 'opedate' not in df_sched.columns:
+                        st.error("❌ ไม่พบคอลัมน์ `opedate` ในไฟล์")
+                    else:
+                        from minor_or_db import import_schedule
+                        # Group by op_date แล้ว import ทีละวัน
+                        df_sched['_op_date'] = pd.to_datetime(
+                            df_sched['opedate'], errors='coerce')
+                        df_sched = df_sched.dropna(subset=['_op_date'])
+                        total_imported = 0
+                        for op_date, grp in df_sched.groupby(
+                                df_sched['_op_date'].dt.strftime('%Y-%m-%d')):
+                            n = import_schedule(grp.drop(columns=['_op_date']),
+                                                op_date)
+                            total_imported += n
                         st.success(
-                            f"{mode} — เคส: **{info['inserted']} เพิ่ม**, "
-                            f"{info['skipped']} ซ้ำ (skip)"
+                            f"✅ Import สำเร็จ — **{total_imported} เคส** "
+                            f"จาก {df_sched['_op_date'].dt.strftime('%Y-%m-%d').nunique()} วัน"
                         )
-
-                        # ── Skip stats: rows ที่ DB ไม่รับเพราะข้อมูลไม่ครบ ──
-                        skip_no_date = info.get('skipped_no_date', 0)
-                        skip_no_hn = info.get('skipped_no_hn', 0)
-                        if skip_no_date or skip_no_hn:
-                            st.warning(
-                                f"⚠️ มี **{skip_no_date + skip_no_hn} row** "
-                                f"ที่ skip เพราะข้อมูลไม่ครบ "
-                                f"(missing op_date: {skip_no_date}, "
-                                f"missing HN: {skip_no_hn})"
-                            )
-
-                        if cost_path:
-                            if 'cost_error' in info:
-                                st.warning(
-                                    f"⚠️ Cost Excel: {info['cost_error']}")
-                            else:
-                                cm = info['cost_matched']
-                                cnf = info['cost_not_found']
-                                st.info(
-                                    f"💰 Cost matched: **{cm} เคส**, "
-                                    f"ไม่เจอใน DB: {cnf}"
-                                )
-                                # ⭐ แยกแสดง NOT_FOUND ทั้งหมด (สำคัญ — บอกว่า
-                                # เคสไหนหาย จาก schedule.csv ไม่ครบ
-                                # หรือถูก skip เพราะข้อมูลไม่ครบ)
-                                not_found_rows = [
-                                    s for s in info.get('cost_samples', [])
-                                    if s.get('status') == 'NOT FOUND'
-                                ]
-                                if not_found_rows:
-                                    st.markdown(
-                                        f"**🚨 เคสที่อยู่ใน Cost Excel "
-                                        f"แต่ไม่มีใน DB ({len(not_found_rows)} เคส):**"
-                                    )
-                                    st.caption(
-                                        "เคสเหล่านี้น่าจะอยู่ใน schedule.csv "
-                                        "แต่ถูก skip — ตรวจดูว่ามีข้อมูลครบ "
-                                        "(เช่น opedate, hn) หรือไม่"
-                                    )
-                                    df_nf = pd.DataFrame(not_found_rows)
-                                    st.dataframe(df_nf,
-                                                 use_container_width=True,
-                                                 hide_index=True)
-
-                        # Sample รายชื่อเคสที่ import
-                        if info.get('sample_results'):
-                            st.markdown("**ตัวอย่างเคสที่ import (10 แรก):**")
-                            df_s = pd.DataFrame(info['sample_results'])
-                            st.dataframe(df_s, use_container_width=True,
-                                         hide_index=True)
-
-                        if btn_bulk_import:
-                            st.info(
-                                "🔄 กดปุ่ม Rerun (R) บน browser — "
-                                "หรือเปิด tab \"📈 สถิติย้อนหลัง\" ดูข้อมูลใหม่")
-                    except Exception as e:
-                        st.error(f"❌ Error: {e}")
-                    finally:
-                        for p in tmp_paths:
-                            try: _os.unlink(p)
-                            except OSError: pass
-                        if cost_path:
-                            try: _os.unlink(cost_path)
-                            except OSError: pass
+                except Exception as e:
+                    import traceback
+                    st.error(f"❌ Error: {e}")
+                    st.code(traceback.format_exc())
 
         # =========================================================
-        # ② Import Pre-Merged CSV (เตรียมไฟล์ภายนอกแล้ว upload)
+        # ② 🏥 Upload Intraop (.xls/.xlsx/.csv)
         # =========================================================
-        with st.expander(
-                "📥 ② Import Pre-Merged CSV/Excel (1 ไฟล์ครบ)",
-                expanded=False):
+        with st.expander("🏥 ② Upload Intraop (HIS file)", expanded=False):
             st.caption(
-                "ใช้กรณีเตรียมไฟล์ merged มาเองภายนอก "
-                "(เช่น script รวม sched + intraop + cost ก่อนแล้ว)\n\n"
-                "ไฟล์ต้องมี columns: **op_date** (YYYY-MM-DD), **hn** "
-                "และ optional ทุก column ใน DB เช่น procedure_name, "
-                "surgeon_name, case_category, in_or_at, op_end_at, "
-                "actual_duration_min, treatment_cost, patho_cost, ...\n\n"
-                "Skip rows ที่ HN+Date ซ้ำกับ DB อยู่แล้ว"
+                "🩺 Upload **intraop file** จากระบบ HIS (.xls/.xlsx/.csv) — "
+                "ระบบจะอัปเดต **timestamps + พยาบาล + ผู้ทำจริง** "
+                "ของเคสที่มีอยู่แล้ว (match by `hn + opedate`)\n\n"
+                "✅ บันทึก **surgeon_name = ผู้ทำจริง** "
+                "(ทับของเดิม — แต่ scheduled_surgeon ไม่ถูกแตะ)\n"
+                "✅ คอลัมน์ที่ต้องมี: `hn, opedate, roomtimein, roomtimeout, "
+                "dctnm, nursurgnm, nurcircunm`"
             )
-            merged_file = st.file_uploader(
-                "📄 Merged CSV หรือ Excel",
-                type=['csv', 'xlsx', 'xls'], key="merged_csv_file",
+            intra_file = st.file_uploader(
+                "เลือกไฟล์ intraop (.xls/.xlsx/.csv)",
+                type=['xls', 'xlsx', 'csv'], key="maint_intra_upload",
             )
-            if merged_file is not None:
-                mb1, mb2 = st.columns(2)
-                with mb1:
-                    btn_m_preview = st.button(
-                        "🔍 Preview", use_container_width=True,
-                        key="btn_merged_preview")
-                with mb2:
-                    btn_m_apply = st.button(
-                        "✅ Import", type="primary",
-                        use_container_width=True, key="btn_merged_apply")
+            if intra_file is not None and st.button(
+                    "🔄 Update Timestamps + Nurses",
+                    key="btn_maint_intra_import", type='primary'):
+                import tempfile, os as _os
+                tmp_p = None
+                try:
+                    suffix = '.' + intra_file.name.split('.')[-1]
+                    with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=suffix) as tmp:
+                        tmp.write(intra_file.getvalue())
+                        tmp_p = tmp.name
+                    from import_historical import reimport_timestamps
+                    result = reimport_timestamps(tmp_p)
+                    st.success(
+                        f"✅ อัปเดตสำเร็จ — แตะ **{result.get('updated', 0)}"
+                        f" เคส** จาก {result.get('total', 0)} rows ในไฟล์"
+                    )
+                    if result.get('not_found', 0) > 0:
+                        st.warning(
+                            f"⚠️ ไม่เจอใน DB: {result['not_found']} เคส "
+                            f"(ต้อง upload schedule ก่อน)"
+                        )
+                except Exception as e:
+                    import traceback
+                    st.error(f"❌ Error: {e}")
+                    st.code(traceback.format_exc())
+                finally:
+                    if tmp_p:
+                        try: _os.unlink(tmp_p)
+                        except OSError: pass
 
-                if btn_m_preview or btn_m_apply:
-                    import tempfile, os as _os
-                    tmp_p = None
-                    try:
-                        merged_file.seek(0)
-                        suffix = ('.xlsx'
-                                  if merged_file.name.endswith(('.xlsx', '.xls'))
-                                  else '.csv')
-                        with tempfile.NamedTemporaryFile(
-                                delete=False, suffix=suffix,
-                                mode='wb') as tmp:
-                            tmp.write(merged_file.read())
-                            tmp_p = tmp.name
-
-                        from import_historical import import_merged_csv
-                        info = import_merged_csv(
-                            tmp_p, dry_run=not btn_m_apply)
-
-                        if 'error' in info:
-                            st.error(f"❌ {info['error']}")
-                        else:
-                            mode = "✅ Imported" if btn_m_apply else "🔍 Preview"
-                            st.success(
-                                f"{mode} — เพิ่ม **{info['inserted']} เคส**, "
-                                f"ข้าม {info['skipped_duplicate']} ซ้ำ, "
-                                f"{info['skipped_invalid']} invalid"
-                            )
-                            if info.get('columns_ignored'):
-                                st.caption(
-                                    f"ℹ️ Columns ที่ไม่ตรงกับ DB schema "
-                                    f"(ถูก ignore): "
-                                    f"{', '.join(info['columns_ignored'][:10])}"
-                                )
-                            if info.get('samples'):
-                                st.markdown("**ตัวอย่างเคสที่ import:**")
-                                df_m = pd.DataFrame(info['samples'])
-                                st.dataframe(df_m, use_container_width=True,
-                                             hide_index=True)
-                            if btn_m_apply:
-                                st.info("🔄 กดปุ่ม R เพื่อ refresh")
-                    except Exception as e:
-                        import traceback
-                        st.error(f"❌ Error: {e}")
-                        st.code(traceback.format_exc())
-                    finally:
-                        if tmp_p:
-                            try: _os.unlink(tmp_p)
-                            except OSError: pass
-
-        with st.expander("🚨 ③ ล้าง DB สะอาดหมดจด (Clean Wipe)", expanded=False):
-            from minor_or_db import get_db_table_counts, clear_all_data
+        # =========================================================
+        # ③ 🚨 Wipe Data (ทั้งหมด หรือ เฉพาะวันที่)
+        # =========================================================
+        with st.expander("🚨 ③ ล้างข้อมูล (Clean Wipe)", expanded=False):
+            from minor_or_db import (get_db_table_counts, clear_all_data,
+                                     clear_cases_by_date_range)
             counts = get_db_table_counts()
             total_rows = sum(counts.values())
 
-            st.error(
-                f"⚠️ **เตือน: การลบนี้ไม่สามารถย้อนกลับได้!**\n\n"
-                f"จะลบข้อมูล **ทั้งหมด {total_rows} แถว** จากทุก table:\n"
-                f"- 🏥 **cases**: {counts.get('cases', 0)} เคส "
-                "(รวม walk-in ที่เพิ่มผ่าน UI)\n"
-                f"- 📝 **audit_log**: {counts.get('audit_log', 0)} รายการ "
-                "(history การแก้ไข)\n"
-                f"- ⚙️ **room_settings**: {counts.get('room_settings', 0)} แถว "
-                "(nurse + ห้อง)\n\n"
-                "🛡️ **ระบบจะตั้ง flag ป้องกัน auto-import** อัตโนมัติ — "
-                "DB จะอยู่ในสถานะว่างจริงหลัง reboot จนกว่ามุ้กกจะ upload "
-                "ไฟล์ผ่าน UI (flag จะถูกล้างเอง)"
+            _wipe_mode = st.radio(
+                "เลือกแบบลบ",
+                options=['ลบทั้งหมด', 'เฉพาะวันที่'],
+                horizontal=True, key='maint_wipe_mode',
             )
 
-            confirm_wipe = st.checkbox(
-                f"ฉันยืนยันว่าต้องการลบ DB ทั้งหมด ({total_rows} แถว)",
-                key="clear_db_confirm",
-            )
-            btn_wipe = st.button(
-                "🔴 ล้าง DB ทั้งหมด (Clean Wipe)",
-                type="primary",
-                disabled=not confirm_wipe or total_rows == 0,
-                use_container_width=True,
-                key="btn_clear_db",
-            )
-            if btn_wipe and confirm_wipe:
-                try:
-                    result = clear_all_data()
-                    n_total = sum(result.values())
-                    st.success(
-                        f"✅ ลบเรียบร้อย — **{n_total} แถว** ถูกลบจาก DB\n\n"
-                        f"- cases: {result.get('cases', 0)} เคส\n"
-                        f"- audit_log: {result.get('audit_log', 0)} รายการ\n"
-                        f"- room_settings: {result.get('room_settings', 0)} แถว"
+            if _wipe_mode == 'ลบทั้งหมด':
+                st.error(
+                    f"⚠️ **เตือน: การลบนี้ไม่สามารถย้อนกลับได้!**\n\n"
+                    f"จะลบข้อมูล **ทั้งหมด {total_rows} แถว** จากทุก table:\n"
+                    f"- 🏥 **cases**: {counts.get('cases', 0)} เคส\n"
+                    f"- 📝 **audit_log**: {counts.get('audit_log', 0)} รายการ\n"
+                    f"- ⚙️ **room_settings**: {counts.get('room_settings', 0)} แถว"
+                )
+                confirm_wipe = st.checkbox(
+                    f"ฉันยืนยันว่าต้องการลบ DB ทั้งหมด ({total_rows} แถว)",
+                    key="clear_db_confirm_all",
+                )
+                if st.button(
+                        "🔴 ล้าง DB ทั้งหมด", type='primary',
+                        disabled=not confirm_wipe or total_rows == 0,
+                        use_container_width=True,
+                        key="btn_clear_db_all"):
+                    try:
+                        result = clear_all_data()
+                        n_total = sum(result.values())
+                        st.success(
+                            f"✅ ลบเรียบร้อย — **{n_total} แถว** ถูกลบจาก DB"
+                        )
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+            else:
+                # ลบเฉพาะวันที่
+                col_dw1, col_dw2 = st.columns(2)
+                with col_dw1:
+                    _wf = st.date_input(
+                        "ตั้งแต่วันที่",
+                        value=_now_bkk().date() - timedelta(days=7),
+                        key='maint_wipe_from',
                     )
-                    st.info(
-                        "🛡️ **ตั้ง flag กัน auto-import แล้ว** — reboot ครั้งหน้า "
-                        "จะไม่โหลด historical_data/ ทับ\n\n"
-                        "📌 **ขั้นต่อไป:**\n\n"
-                        "1. ไปหน้า **ตารางผ่าตัด** (ทางเมนูซ้าย)\n"
-                        "2. **Upload CSV** ของตารางผ่าตัดที่ต้องการ\n"
-                        "3. flag จะถูกล้างอัตโนมัติเมื่อ upload สำเร็จ\n\n"
-                        "💡 ถ้าอยากให้ auto-import จาก `historical_data/` "
-                        "วิ่งใหม่: ลบ DB อีกครั้ง แล้วอย่า upload — กด reboot — "
-                        "**แต่ flag ยังกันอยู่!** ต้องล้าง flag manual "
-                        "ผ่าน Python console (รายละเอียดถามได้)"
+                with col_dw2:
+                    _wt = st.date_input(
+                        "ถึงวันที่",
+                        value=_now_bkk().date(),
+                        key='maint_wipe_to',
                     )
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
+                # นับเคสในช่วง
+                from minor_or_db import get_conn as _gc_count
+                _conn_c = _gc_count()
+                _n_range = _conn_c.execute(
+                    "SELECT COUNT(*) FROM cases WHERE op_date BETWEEN ? AND ?",
+                    (str(_wf), str(_wt))).fetchone()[0]
+                _conn_c.close()
 
+                st.warning(
+                    f"⚠️ จะลบเคส **{_n_range} เคส** ในช่วง "
+                    f"{_wf.strftime('%d/%m/%Y')} ถึง {_wt.strftime('%d/%m/%Y')}\n\n"
+                    "ไม่แตะ audit_log / room_settings"
+                )
+                confirm_wipe_d = st.checkbox(
+                    f"ฉันยืนยันว่าต้องการลบ {_n_range} เคสในช่วงนี้",
+                    key="clear_db_confirm_date",
+                )
+                if st.button(
+                        f"🟠 ล้างเคสในช่วงนี้ ({_n_range} เคส)", type='primary',
+                        disabled=not confirm_wipe_d or _n_range == 0,
+                        use_container_width=True,
+                        key="btn_clear_db_date"):
+                    try:
+                        n_del = clear_cases_by_date_range(str(_wf), str(_wt))
+                        st.success(
+                            f"✅ ลบเรียบร้อย — **{n_del} เคส** ถูกลบ "
+                            f"({_wf.strftime('%d/%m/%Y')} - "
+                            f"{_wt.strftime('%d/%m/%Y')})"
+                        )
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
     # -- TAB 3: AI Prediction (งานวิจัย) --
     with tab_ai:
         _render_ai_research_tab()
