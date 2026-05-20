@@ -189,6 +189,47 @@ def _demo_to_real_ts(sim_min, current_sim_min):
     return real_dt.strftime('%Y-%m-%d %H:%M:%S')
 
 
+def _get_demo_cases_df(current_sim_min):
+    """Return demo cases เป็น DataFrame (เหมือน get_cases) สำหรับ Upcoming Queue
+    + Hourly Throughput."""
+    rows = []
+    for c in _DEMO_CASES:
+        (arr_m, ior_m, end_m, dc_m, room, name, hn, dx, proc,
+         surg, ai_min, override) = c
+
+        # Determine status at current sim_min (same logic as _get_demo_rooms)
+        if override == 'cancelled':
+            status = 'cancelled' if current_sim_min >= arr_m else 'scheduled'
+        elif current_sim_min < arr_m:
+            status = 'scheduled'
+        elif ior_m and current_sim_min < ior_m:
+            status = 'arrived'
+        elif end_m and current_sim_min < end_m:
+            status = 'in_or'
+        elif dc_m and current_sim_min < dc_m:
+            status = 'post_op'
+        elif dc_m and current_sim_min >= dc_m:
+            status = 'discharged'
+        else:
+            status = 'arrived'
+
+        rows.append({
+            'case_id': hn,
+            'name': name,
+            'hn': hn,
+            'procedure_name': proc,
+            'surgeon_name': surg,
+            'status': status,
+            'arrived_at': _demo_to_real_ts(arr_m, current_sim_min),
+            'in_or_at': _demo_to_real_ts(ior_m, current_sim_min),
+            'op_end_at': _demo_to_real_ts(end_m, current_sim_min),
+            'discharged_at': _demo_to_real_ts(dc_m, current_sim_min),
+            'ai_predicted_min': ai_min,
+            'room_no': room,
+        })
+    return pd.DataFrame(rows)
+
+
 def _get_demo_rooms(current_sim_min):
     """Return rooms list (เหมือน get_room_status) สำหรับ demo mode."""
     rooms_data = {1: [], 3: [], 4: [], 5: []}
@@ -534,11 +575,28 @@ def _render_demo_controls():
 
 
 def _render_one_room_card(rm):
-    """Render single room card (used in 2x2 grid)."""
+    """Linear/Stripe-style minimal room card."""
     active = rm['active_case']
+    room_no = rm['room_no']
+
+    # ── Defaults (Idle state) ──
+    status_dot = '#b0bec5'
+    status_label = 'Idle'
+    status_color = '#90a4ae'
+    procedure = 'No scheduled case'
+    procedure_color = '#b0bec5'
+    bar_html = ('<div style="background:#eceff1;height:4px;'
+                'border-radius:2px;margin:10px 0;"></div>')
+    info_left = 'Available'
+    info_right = '—'
+    info_right_color = '#90a4ae'
+    card_border = '0.5px solid #e0e0e0'
+    card_bg = '#fafafa'  # idle = subtle gray bg
+    sub_html = ''  # extra row (e.g. surgeon)
 
     if active:
-        # กำลังผ่าตัด — แสดง diagnosis + AI bar + confidence
+        # ── กำลังผ่าตัด ──
+        card_bg = 'white'
         elapsed_min = 0
         if active.get('in_or_at'):
             try:
@@ -550,133 +608,113 @@ def _render_one_room_card(rm):
                 pass
 
         ai_min = active.get('ai_predicted_min') or 0
-        pct = int((elapsed_min / ai_min) * 100) if ai_min else 0
-        # cap bar fill at 100% for display, but show actual % in label
-        bar_width = min(pct, 100)
+        proc = active.get('procedure_name') or '—'
+        procedure = proc
+        procedure_color = '#263238'
 
-        # Bar color shifts subtly when over 100%
-        bar_color = '#26a69a' if pct <= 100 else '#ef5350'
-
-        n_cases = active.get('_ai_n_cases', 0)
-        confidence = active.get('_ai_confidence', '-')
-        source = active.get('_ai_source', '')
-
-        # Confidence emoji
-        conf_emoji = {'สูงมาก': '🟢', 'สูง': '🟢', 'ปานกลาง': '🟡',
-                      'ต่ำ': '🔴'}.get(confidence, '⚪')
-        if source == 'local_history' and n_cases:
-            conf_text = (f"{conf_emoji} AI มั่นใจ <b>{confidence}</b> "
-                         f"(จาก {n_cases} เคสคล้ายกัน)")
-        elif source == 'ml_model':
-            conf_text = (f"{conf_emoji} AI มั่นใจ <b>{confidence}</b> "
-                         "(ML model — ไม่มีประวัติเคสคล้าย)")
+        if ai_min and elapsed_min > ai_min:
+            # 🟠 Overrunning
+            over_min = elapsed_min - ai_min
+            status_dot = '#ef6c00'
+            status_label = 'Overrunning'
+            status_color = '#ef6c00'
+            bar_color = '#ef6c00'
+            bar_pct = min(elapsed_min / ai_min * 100, 110)
+            info_left = f'Elapsed {elapsed_min} min'
+            info_right = f'+{over_min} min over'
+            info_right_color = '#c62828'
+            card_border = '0.5px solid #ffcdd2'
+        elif ai_min:
+            # 🟢 In progress
+            status_dot = '#2e7d32'
+            status_label = 'In progress'
+            status_color = '#2e7d32'
+            bar_color = '#43a047'
+            bar_pct = max(min(elapsed_min / ai_min * 100, 100), 5)
+            est_left = max(ai_min - elapsed_min, 0)
+            info_left = f'Elapsed {elapsed_min} min'
+            info_right = f'Est. {est_left} min left'
         else:
-            conf_text = ''
+            # 🟢 In progress (no AI)
+            status_dot = '#2e7d32'
+            status_label = 'In progress'
+            status_color = '#2e7d32'
+            bar_color = '#90a4ae'
+            bar_pct = 50
+            info_left = f'Elapsed {elapsed_min} min'
+            info_right = 'No AI estimate'
 
-        diag = (active.get('diagnosis') or '').strip()
-        diag_safe = diag.replace('"', '&quot;')
-        diag_html = ''
-        if diag and diag.lower() not in ('-', 'nan', 'none'):
-            diag_html = (
-                f'<div style="font-size:12px;color:#607d8b;'
-                f'font-style:italic;margin:2px 0;overflow:hidden;'
-                f'text-overflow:ellipsis;white-space:nowrap;" '
-                f'title="{diag_safe}">🩺 {diag}</div>'
-            )
-
-        ai_pred_html = (f'🤖 AI ทำนายเวลาใช้ห้อง {ai_min} น. | '
-                        f'ใช้ไป <b>{elapsed_min}</b> น.'
-                        if ai_min else f'⏱ ใช้ไป {elapsed_min} นาที')
-
-        # IMPORTANT: HTML must be on ONE LINE (no leading whitespace)
-        # otherwise Streamlit's markdown parser treats it as code block
-        bar_html = ''
-        if ai_min:
-            bar_html = (
-                f'<div style="background:#e0e0e0;border-radius:8px;'
-                f'height:18px;margin-top:6px;overflow:hidden;'
-                f'position:relative;">'
-                f'<div style="background:{bar_color};height:100%;'
-                f'width:{bar_width}%;transition:width 1s ease;'
-                f'border-radius:8px;"></div>'
-                f'<div style="position:absolute;top:0;left:0;right:0;'
-                f'bottom:0;display:flex;align-items:center;'
-                f'justify-content:center;font-size:11px;font-weight:700;'
-                f'color:#333;">{pct}%</div>'
-                f'</div>'
-            )
-
-        # Build full HTML as single concatenated string — no leading whitespace
-        # (Streamlit markdown treats indented lines as code blocks)
-        nm_safe = (active.get('name') or '-').replace('"', '&quot;')
-        proc_safe = (active.get('procedure_name') or '-').replace('"', '&quot;')
-        card_html = (
-            f'<div class="room-card room-busy" style="text-align:left;">'
-            f'<div style="font-size:14px;font-weight:700;color:#1565c0;'
-            f'margin-bottom:4px;">🏥 ห้อง {rm["room_no"]}'
-            f'<span style="float:right;font-size:11px;color:#1976d2;">'
-            f'🔵 กำลังผ่าตัด</span></div>'
-            f'<div style="font-size:13px;color:#333;font-weight:600;'
-            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" '
-            f'title="{nm_safe}">👤 {active.get("name") or "-"}</div>'
-            f'{diag_html}'
-            f'<div style="font-size:13px;color:#1565c0;margin:2px 0;'
-            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" '
-            f'title="{proc_safe}">'
-            f'⚕ <b>{active.get("procedure_name") or "-"}</b></div>'
-            f'<div style="font-size:11px;color:#666;">'
-            f'👨‍⚕️ {active.get("surgeon_name") or "-"}</div>'
-            f'<div style="font-size:12px;color:#444;margin-top:6px;">'
-            f'{ai_pred_html}</div>'
-            f'{bar_html}'
-            f'<div style="font-size:11px;color:#666;margin-top:4px;">'
-            f'{conf_text}</div>'
+        bar_html = (
+            f'<div style="background:#eceff1;height:4px;border-radius:2px;'
+            f'margin:10px 0;overflow:hidden;">'
+            f'<div style="background:{bar_color};height:100%;'
+            f'width:{bar_pct}%;border-radius:2px;'
+            f'transition:width 1s ease;"></div>'
             f'</div>'
         )
-        st.markdown(card_html, unsafe_allow_html=True)
+        # Surgeon line (small)
+        surg = (active.get('surgeon_name') or '').strip()
+        if surg:
+            from minor_or_db import _PROC_RULES  # noqa: F401 — just to load
+            # ใช้ normalize ตัดยศ (มีอยู่แล้วใน admin.py)
+            surg_clean = _normalize_nurse_name(surg) or surg
+            sub_html = (f'<div style="font-size:11px;color:#90a4ae;'
+                        f'margin-top:-2px;white-space:nowrap;overflow:hidden;'
+                        f'text-overflow:ellipsis;">👨‍⚕️ {surg_clean}</div>')
 
     elif rm['done'] > 0 and rm['waiting'] == 0:
-        st.markdown(f"""
-        <div class="room-card room-done" style="text-align:center;">
-            <div style="font-size:14px;font-weight:700;color:#2e7d32;">
-              🏥 ห้อง {rm['room_no']}</div>
-            <div style="font-size:11px;color:#388e3c;margin:4px 0;">
-              ✅ เสร็จแล้ว</div>
-            <div style="font-size:32px;font-weight:700;color:#2e7d32;">
-              {rm['done']}</div>
-            <div style="font-size:12px;color:#666;">เคสเสร็จวันนี้</div>
-        </div>
-        """, unsafe_allow_html=True)
-    elif rm['total'] > 0:
-        st.markdown(f"""
-        <div class="room-card room-free" style="text-align:center;">
-            <div style="font-size:14px;font-weight:700;color:#616161;">
-              🏥 ห้อง {rm['room_no']}</div>
-            <div style="font-size:11px;color:#f57f17;margin:4px 0;">
-              ⏳ รอเข้าห้อง</div>
-            <div style="font-size:32px;font-weight:700;color:#f57f17;">
-              {rm['waiting']}</div>
-            <div style="font-size:12px;color:#666;">
-              เคสรอ / {rm['total']} ทั้งหมด</div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class="room-card room-free" style="text-align:center;">
-            <div style="font-size:14px;font-weight:700;color:#9e9e9e;">
-              🏥 ห้อง {rm['room_no']}</div>
-            <div style="font-size:11px;color:#bdbdbd;margin:4px 0;">—</div>
-            <div style="font-size:24px;font-weight:700;color:#bdbdbd;">
-              🌙 ห้องว่าง</div>
-            <div style="font-size:12px;color:#ccc;">พร้อมรับเคสถัดไป</div>
-        </div>
-        """, unsafe_allow_html=True)
+        # ✅ All done
+        status_dot = '#2e7d32'
+        status_label = 'Done'
+        status_color = '#2e7d32'
+        procedure = f'เคสเสร็จแล้ว {rm["done"]} เคสวันนี้'
+        procedure_color = '#455a64'
+        card_bg = 'white'
+    elif rm['waiting'] > 0:
+        # 🟠 Waiting / Turnover
+        status_dot = '#fb8c00'
+        status_label = 'Waiting'
+        status_color = '#ef6c00'
+        procedure = f'รอเข้าห้อง {rm["waiting"]} เคส'
+        procedure_color = '#455a64'
+        info_left = f'{rm["total"]} เคสทั้งวัน'
+        info_right = f'เสร็จแล้ว {rm["done"]}'
+        info_right_color = '#90a4ae'
+        card_bg = 'white'
+
+    # ── Card HTML ──
+    proc_safe = procedure.replace('"', '&quot;')
+    card_html = (
+        f'<div style="background:{card_bg};border:{card_border};'
+        f'border-radius:10px;padding:12px 14px;">'
+        f'<div style="font-size:11px;color:#607d8b;margin-bottom:4px;">'
+        f'ห้อง {room_no}</div>'
+        f'<div style="display:flex;align-items:center;gap:5px;'
+        f'margin-bottom:8px;">'
+        f'<span style="width:7px;height:7px;background:{status_dot};'
+        f'border-radius:50%;display:inline-block;"></span>'
+        f'<span style="font-size:12px;color:{status_color};'
+        f'font-weight:500;">{status_label}</span></div>'
+        f'<div style="font-size:14px;font-weight:500;color:{procedure_color};'
+        f'line-height:1.3;min-height:38px;overflow:hidden;'
+        f'text-overflow:ellipsis;white-space:nowrap;" title="{proc_safe}">'
+        f'{procedure}</div>'
+        f'{sub_html}'
+        f'{bar_html}'
+        f'<div style="display:flex;justify-content:space-between;'
+        f'font-size:11px;color:#607d8b;">'
+        f'<span>{info_left}</span>'
+        f'<span style="color:{info_right_color};">{info_right}</span></div>'
+        f'</div>'
+    )
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def _render_room_cards(rooms):
-    """2x2 grid layout (2 cards per row)"""
+    """Adaptive grid — 4 cards per row (Linear-style minimal)"""
     n = len(rooms)
-    per_row = 2
+    # 1-2 rooms = แสดงเต็มแถว · 3-4+ = 4 cols
+    per_row = min(n, 4) if n > 0 else 1
     for row_start in range(0, n, per_row):
         row_rooms = rooms[row_start:row_start + per_row]
         cols = st.columns(per_row)
@@ -2883,17 +2921,28 @@ def page_admin():
         sim_min = _render_demo_controls()
         demo_active = sim_min is not None
 
-        # ── Auto-refresh: เฉพาะ demo mode เท่านั้น (normal ใช้ R/F5 เอง) ──
-        # เหตุผล: refresh อัตโนมัติทำให้หน้า History ที่กำลังดูอยู่ refresh ทับ
-        if demo_active:
+        # ── Auto-refresh: เฉพาะ demo mode + กำลังเล่น + ยังไม่จบ ──
+        # ⚠️ ลบ meta http-equiv refresh fallback ออก — เพราะมัน full reload
+        # → ทำลาย session_state → demo toggle รีเซ็ต
+        # ใช้แค่ streamlit_autorefresh เท่านั้น (Streamlit-native rerun)
+        _demo_state = st.session_state.get('demo', {})
+        _demo_playing = _demo_state.get('playing', True)
+        _demo_done = (sim_min is not None and sim_min >= _DEMO_END_MIN)
+        if demo_active and _demo_playing and not _demo_done:
             try:
                 from streamlit_autorefresh import st_autorefresh
                 st_autorefresh(interval=3_000, key='demo_refresh')
             except ImportError:
-                st.markdown(
-                    '<meta http-equiv="refresh" content="3">',
-                    unsafe_allow_html=True,
+                st.warning(
+                    "⚠️ ไม่พบ package `streamlit-autorefresh` — Demo Mode "
+                    "ไม่ refresh อัตโนมัติ\n\n"
+                    "💡 ติดตั้ง: `pip install streamlit-autorefresh` แล้ว reboot"
                 )
+        elif demo_active and _demo_done:
+            st.success(
+                "✅ Demo จบแล้ว — เห็นภาพรวมเคสทั้งวัน · "
+                "กด ⏹ รีเซ็ต เพื่อเริ่มใหม่ หรือปิด Demo Mode"
+            )
 
         # =========================================================
         # Section: เคสในเวลา
@@ -2909,42 +2958,184 @@ def page_admin():
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div class="section-title">🏥 สถานะห้องผ่าตัด</div>',
-                    unsafe_allow_html=True)
+        # โหลด data ก่อน (rooms + kpi)
         if demo_active:
             rooms = _get_demo_rooms(sim_min)
             kpi = _get_demo_kpi(sim_min)
         else:
             rooms = get_room_status(op_date)
             kpi = get_kpi(op_date)
-        _render_room_cards(rooms)
 
-        _thai_months = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-                        'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
-        _today_dt = _now_bkk()
-        _thai_date = (f"{_today_dt.day} {_thai_months[_today_dt.month]} "
-                      f"{_today_dt.year + 543}")
-        title_label = ('🎬 ตัวเลขสำคัญ (Demo)' if demo_active
-                       else f'📈 ตัวเลขสำคัญ — {_thai_date}')
-        st.markdown(f'<div class="section-title">{title_label}</div>',
+        # 🎬 KPI section ขึ้นก่อน Room status
+        _thai_months_top = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+                            'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+        _today_dt_top = _now_bkk()
+        _thai_date_top = (f"{_today_dt_top.day} "
+                          f"{_thai_months_top[_today_dt_top.month]} "
+                          f"{_today_dt_top.year + 543}")
+        title_label_top = ('🎬 ตัวเลขสำคัญ (Demo)' if demo_active
+                           else f'📈 ตัวเลขสำคัญ — {_thai_date_top}')
+        st.markdown(f'<div class="section-title">{title_label_top}</div>',
                     unsafe_allow_html=True)
         _render_kpi(kpi)
 
         if kpi.get('total', 0) > 0:
-            progress = kpi['done'] / kpi['total']
+            progress_top = kpi['done'] / kpi['total']
             st.markdown(f"""
             <div style="margin:12px 0 4px;">
                 <div style="display:flex;justify-content:space-between;font-size:13px;color:#333;font-weight:700;">
                     <span>ความคืบหน้า{'จำลอง' if demo_active else 'วันนี้'}</span>
-                    <span>{kpi['done']}/{kpi['total']} เคส ({progress:.0%})</span>
+                    <span>{kpi['done']}/{kpi['total']} เคส ({progress_top:.0%})</span>
                 </div>
                 <div style="background:#e0e0e0;border-radius:6px;height:12px;margin-top:4px;">
                     <div style="background:linear-gradient(90deg,#43a047,#66bb6a);
-                                height:100%;width:{progress*100:.0f}%;border-radius:6px;
+                                height:100%;width:{progress_top*100:.0f}%;border-radius:6px;
                                 transition:width 0.5s;"></div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
+        # 🏥 Room status (ย้ายมาด้านล่าง KPI)
+        st.markdown('<div class="section-title">🏥 สถานะห้องผ่าตัด</div>',
+                    unsafe_allow_html=True)
+        _render_room_cards(rooms)
+
+        # ════════════════════════════════════════════════════════════════
+        # 🕐 UPCOMING QUEUE + HOURLY THROUGHPUT (รองรับ demo + real mode)
+        # ════════════════════════════════════════════════════════════════
+        if True:  # always render — เลือก data source ตาม mode
+            if demo_active:
+                _cases_today = _get_demo_cases_df(sim_min)
+            else:
+                from minor_or_db import get_cases as _get_cases_today
+                _cases_today = _get_cases_today(op_date=op_date)
+
+            # ── 🕐 Upcoming queue ──
+            _waiting = _cases_today[
+                _cases_today['status'].isin(['scheduled', 'arrived'])].copy()
+            if not _waiting.empty:
+                st.markdown(
+                    '<div style="font-size:10px;font-weight:600;color:#757575;'
+                    'text-transform:uppercase;letter-spacing:0.8px;'
+                    'margin:18px 0 8px;">🕐 Upcoming queue — '
+                    'เคสที่รอเข้าห้อง</div>',
+                    unsafe_allow_html=True)
+
+                # Helper: ชื่อย่อ (เพื่อ privacy)
+                def _short_name(full):
+                    if not full or not isinstance(full, str):
+                        return '—'
+                    parts = full.strip().split()
+                    if len(parts) >= 2:
+                        return f"{parts[0][:1]}. {parts[-1][:1]}."
+                    return full[:8]
+
+                # Limit ~8 เคส
+                _waiting_show = _waiting.head(8)
+                for i, (_, row) in enumerate(_waiting_show.iterrows(), 1):
+                    _ai = int(row.get('ai_predicted_min') or 0)
+                    _ai_html = (f'<span style="color:#1565c0;font-weight:500;">'
+                                f'{_ai} min</span>' if _ai else
+                                '<span style="color:#90a4ae;">— min</span>')
+                    _room = row.get('room_no')
+                    _room_html = (f'<span style="font-size:11px;color:#90a4ae;">'
+                                  f'→ ห้อง {_room}</span>' if _room else '')
+                    _status = row.get('status')
+                    if _status == 'arrived':
+                        _badge_bg = '#e8f5e9'
+                        _badge_c = '#2e7d32'
+                        _badge_t = 'Ready'
+                    else:
+                        _badge_bg = '#fff8e1'
+                        _badge_c = '#bf360c'
+                        _badge_t = 'Waiting'
+                    _name = _short_name(row.get('name'))
+                    _proc = str(row.get('procedure_name') or '—')[:35]
+
+                    st.markdown(
+                        f'<div style="background:white;border:0.5px solid #e0e0e0;'
+                        f'border-radius:8px;padding:10px 14px;margin-bottom:6px;'
+                        f'display:flex;align-items:center;gap:14px;">'
+                        f'<div style="font-size:13px;color:#90a4ae;'
+                        f'min-width:18px;">{i}</div>'
+                        f'<div style="flex:1;min-width:0;">'
+                        f'<div style="font-size:13px;color:#263238;'
+                        f'font-weight:500;">{_name}</div>'
+                        f'<div style="font-size:12px;color:#607d8b;'
+                        f'overflow:hidden;text-overflow:ellipsis;'
+                        f'white-space:nowrap;">{_proc}</div></div>'
+                        f'<div style="text-align:right;min-width:90px;">'
+                        f'<div>{_ai_html}</div>'
+                        f'{_room_html}</div>'
+                        f'<div style="background:{_badge_bg};color:{_badge_c};'
+                        f'font-size:11px;padding:3px 12px;border-radius:12px;'
+                        f'font-weight:500;min-width:60px;text-align:center;">'
+                        f'{_badge_t}</div></div>',
+                        unsafe_allow_html=True)
+                if len(_waiting) > 8:
+                    st.caption(f"… และอีก {len(_waiting) - 8} เคส")
+            else:
+                st.markdown(
+                    '<div style="background:#fafafa;border:0.5px dashed #e0e0e0;'
+                    'border-radius:10px;padding:14px;text-align:center;'
+                    'margin:18px 0 12px;font-size:13px;color:#90a4ae;">'
+                    '🕐 ไม่มีเคสรอเข้าห้อง</div>',
+                    unsafe_allow_html=True)
+
+            # ── 📊 Hourly throughput (today) ──
+            _done_today = _cases_today[
+                _cases_today['status'].isin(
+                    ['post_op', 'discharged', 'done', 'cancelled'])].copy()
+            if not _done_today.empty:
+                # ใช้ op_end_at สำหรับ completed, in_or_at สำหรับ cancelled
+                _done_today['_ref_time'] = _done_today.apply(
+                    lambda r: (r.get('op_end_at') if r.get('status') != 'cancelled'
+                               else r.get('in_or_at')), axis=1)
+                _done_today = _done_today.dropna(subset=['_ref_time'])
+                if not _done_today.empty:
+                    _done_today['_hour'] = pd.to_datetime(
+                        _done_today['_ref_time']).dt.hour
+                    _done_today['_grp'] = _done_today['status'].apply(
+                        lambda s: 'Cancelled' if s == 'cancelled' else 'Completed')
+                    _hourly = (_done_today.groupby(['_hour', '_grp'])
+                               .size().reset_index(name='n'))
+                    # เติม hour ที่ขาดให้ครบ 8-17
+                    _all_hours = pd.DataFrame({'_hour': list(range(8, 18))})
+                    _hourly_full = []
+                    for grp in ['Completed', 'Cancelled']:
+                        _sub = _hourly[_hourly['_grp'] == grp]
+                        _merged = _all_hours.merge(_sub, on='_hour',
+                                                   how='left').fillna(
+                            {'n': 0, '_grp': grp})
+                        _hourly_full.append(_merged)
+                    _hourly_final = pd.concat(_hourly_full, ignore_index=True)
+                    _hourly_final['hour_label'] = _hourly_final['_hour'].apply(
+                        lambda h: f'{int(h):02d}:00')
+
+                    st.markdown(
+                        '<div style="font-size:10px;font-weight:600;'
+                        'color:#757575;text-transform:uppercase;'
+                        'letter-spacing:0.8px;margin:18px 0 8px;">'
+                        '📊 Hourly case throughput — today</div>',
+                        unsafe_allow_html=True)
+                    fig_hourly = px.bar(
+                        _hourly_final, x='hour_label', y='n', color='_grp',
+                        color_discrete_map={
+                            'Completed': '#1976d2', 'Cancelled': '#ef6c00'},
+                        labels={'hour_label': '', 'n': 'จำนวนเคส',
+                                '_grp': ''},
+                        barmode='group',
+                    )
+                    fig_hourly.update_layout(
+                        margin=dict(t=20, b=30, l=40, r=10), height=240,
+                        legend=dict(orientation='h', yanchor='bottom',
+                                    y=1.02, xanchor='left', x=0),
+                        plot_bgcolor='white',
+                        xaxis=dict(showgrid=False),
+                        yaxis=dict(gridcolor='#f0f0f0'),
+                    )
+                    st.plotly_chart(fig_hourly, use_container_width=True,
+                                    config={'displayModeBar': False})
 
         # ── Demo mode: ซ่อน sections ที่อิง real DB (alerts, workload, ฯลฯ) ──
         if demo_active:
