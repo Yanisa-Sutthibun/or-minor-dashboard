@@ -1808,6 +1808,63 @@ def _render_historical_analytics(date_from: str, date_to: str):
     else:
         st.caption("ยังไม่มีข้อมูลรายวัน")
 
+    # 📊 เฉลี่ยเคสตามวันในสัปดาห์ — ย้ายมาก่อน 🔥 heatmap
+    from minor_or_db import get_cases as _get_cases_for_dow
+    _df_dow_section = _get_cases_for_dow()
+    _df_dow_section = _df_dow_section[
+        (_df_dow_section['op_date'] >= date_from) &
+        (_df_dow_section['op_date'] <= date_to) &
+        (_df_dow_section['status'] != 'cancelled')]
+    if not _df_dow_section.empty:
+        st.markdown('<div class="sub-title">📊 เฉลี่ยเคสตามวันในสัปดาห์ '
+                    '(วันไหนงานหนักสุด)</div>',
+                    unsafe_allow_html=True)
+        _dow_df = _df_dow_section.copy()
+        _dow_df['_dt'] = pd.to_datetime(_dow_df['op_date'])
+        _dow_df['dow'] = _dow_df['_dt'].dt.dayofweek
+        _dow_only = _dow_df[_dow_df['dow'].between(0, 4)]
+        _daily_dow_s = (_dow_only.groupby(['op_date', 'dow'])
+                        .size().reset_index(name='n'))
+        _dow_avg_s = (_daily_dow_s.groupby('dow')['n'].mean()
+                      .round(1).reset_index())
+        _THAI_DAY_S = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสฯ', 'ศุกร์']
+        _all_dow_s = pd.DataFrame({'dow': range(5)})
+        _dow_avg_s = _all_dow_s.merge(_dow_avg_s, on='dow', how='left').fillna(0)
+        _dow_avg_s['day_name'] = _dow_avg_s['dow'].apply(
+            lambda d: _THAI_DAY_S[d])
+        _max_dow_s = _dow_avg_s['n'].max()
+        _max_dow_name_s = _dow_avg_s.loc[_dow_avg_s['n'].idxmax(), 'day_name']
+        _dow_avg_s['color_flag'] = _dow_avg_s['n'].apply(
+            lambda v: 'peak' if v == _max_dow_s and v > 0 else 'normal')
+
+        fig_dow_s = px.bar(_dow_avg_s, x='day_name', y='n', text='n',
+                           color='color_flag',
+                           color_discrete_map={
+                               'peak': '#c62828', 'normal': '#4fc3f7'},
+                           labels={'day_name': '', 'n': 'เคสเฉลี่ย/วัน'})
+        fig_dow_s.update_traces(
+            textposition='outside',
+            hovertemplate='<b>%{x}</b><br>เฉลี่ย %{y} เคส/วัน<extra></extra>')
+        _y_max_dow_s = max(float(_dow_avg_s['n'].max()), 1.0)
+        fig_dow_s.update_layout(
+            margin=dict(t=40, b=30, l=40, r=10), height=240,
+            xaxis_title='',
+            yaxis=dict(title='เคสเฉลี่ย/วัน',
+                       range=[0, _y_max_dow_s * 1.25]),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_dow_s, use_container_width=True)
+        _min_dow_s = _dow_avg_s[_dow_avg_s['n'] > 0]['n'].min()
+        if _min_dow_s > 0:
+            _pct_heavier_s = round((_max_dow_s / _min_dow_s - 1) * 100)
+            st.markdown(
+                f'<div style="background:#ffebee;border-left:3px solid #c62828;'
+                f'padding:8px 12px;border-radius:0 6px 6px 0;'
+                f'font-size:12px;color:#b71c1c;margin-top:6px;">'
+                f'<b>วัน{_max_dow_name_s}</b> หนักสุด เฉลี่ย {_max_dow_s} เคส/วัน · '
+                f'หนักกว่าวันที่น้อยที่สุด {_pct_heavier_s}%</div>',
+                unsafe_allow_html=True)
+
     # 🔥 ภาระงานห้องผ่าตัด (full width — ส่วนของ "📈 แนวโน้มเวลา" group)
     with st.container():
         st.markdown('<div class="sub-title">🔥 ภาระงานห้องผ่าตัด (เฉลี่ยเคสต่อครั้ง)</div>',
@@ -1944,23 +2001,65 @@ def _render_historical_analytics(date_from: str, date_to: str):
             st.caption("ยังไม่มีข้อมูลเวลา (ต้องมีเคสที่กดปุ่ม 'เข้าห้อง' และ 'เสร็จ' แล้ว)")
 
     # ════════════════════════════════════════════════════════════════
-    # 4️⃣  🏆 อันดับยอดนิยม — สาขา + Top หัตถการ
+    # 4️⃣  🏆 อันดับยอดนิยม — สาขา + Top หัตถการ + Top แพทย์
     # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header orange">🏆 อันดับยอดนิยม</div>',
-                unsafe_allow_html=True)
+    # Header + Toggle V/H ขวาบน (default = แนวตั้ง)
+    _hdr_l, _hdr_r = st.columns([3, 1])
+    with _hdr_l:
+        st.markdown('<div class="group-header orange">🏆 อันดับยอดนิยม</div>',
+                    unsafe_allow_html=True)
+    with _hdr_r:
+        st.markdown('<div style="height:24px;"></div>', unsafe_allow_html=True)
+        _bar_orient = st.radio(
+            "ทิศทางกราฟ",
+            options=['แนวตั้ง', 'แนวนอน'],
+            horizontal=True, label_visibility='collapsed',
+            key='ranking_bar_orient',
+        )
+    _is_v = (_bar_orient == 'แนวตั้ง')
+
+    # Helper: ย่อชื่อสาขา (ตัด "ศัลยกรรม" ออก)
+    def _short_div(name):
+        if not isinstance(name, str):
+            return str(name)
+        return name.replace('ศัลยกรรม', '').strip() or name
 
     # 🏥 สาขาที่ผ่าตัดเยอะ
     st.markdown('<div class="sub-title">🏥 สาขาที่ผ่าตัดเยอะ</div>',
                 unsafe_allow_html=True)
     div_df = data['div_df']
     if not div_df.empty:
-        fig = px.bar(div_df.head(8), x='n', y='division_name', orientation='h',
-                     labels={'n': 'จำนวนเคส', 'division_name': 'สาขา'},
-                     color_discrete_sequence=['#7e57c2'])
-        fig.update_layout(
-            margin=dict(t=10, b=10, l=10, r=10), height=240,
-            yaxis=dict(autorange='reversed'),
-        )
+        _div_show = div_df.head(8).copy()
+        _div_show['division_short'] = _div_show['division_name'].apply(_short_div)
+        if _is_v:
+            _y_max_div = max(int(_div_show['n'].max()) * 1.20, 5)
+            fig = px.bar(_div_show, x='division_short', y='n', text='n',
+                         labels={'n': 'จำนวนเคส', 'division_short': 'สาขา'},
+                         color_discrete_sequence=['#7e57c2'],
+                         hover_data={'division_name': True, 'division_short': False})
+            fig.update_traces(
+                textposition='outside',
+                hovertemplate='<b>%{customdata[0]}</b><br>%{y} เคส<extra></extra>')
+            fig.update_layout(
+                margin=dict(t=30, b=80, l=40, r=10), height=320,
+                xaxis=dict(tickangle=-30, title='สาขา'),
+                yaxis=dict(title='จำนวนเคส', range=[0, _y_max_div]),
+            )
+        else:
+            fig = px.bar(_div_show, x='n', y='division_short', orientation='h',
+                         text='n',
+                         labels={'n': 'จำนวนเคส', 'division_short': 'สาขา'},
+                         color_discrete_sequence=['#7e57c2'],
+                         hover_data={'division_name': True, 'division_short': False})
+            _x_max_div = max(int(_div_show['n'].max()) * 1.12, 5)
+            fig.update_traces(
+                textposition='outside',
+                hovertemplate='<b>%{customdata[0]}</b><br>%{x} เคส<extra></extra>')
+            fig.update_layout(
+                margin=dict(t=10, b=30, l=10, r=40), height=300,
+                yaxis=dict(autorange='reversed'),
+                xaxis=dict(range=[0, _x_max_div]),
+            )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.caption("ยังไม่มีข้อมูลสาขา")
@@ -1970,84 +2069,185 @@ def _render_historical_analytics(date_from: str, date_to: str):
                 unsafe_allow_html=True)
     proc_df = data['proc_df']
     if not proc_df.empty:
-        # รวมหัตถการที่คล้ายกัน เช่น Off PERM/Off TCC, nail extraction, excision/Excision
         proc_show = group_top_procedures(proc_df, top_n=10).copy()
-        proc_show['label'] = proc_show['procedure_name'].str[:40]
+        proc_show['label_full'] = proc_show['procedure_name'].str[:40]
+        # ย่อสั้น 15 ตัว สำหรับแนวตั้ง
+        proc_show['label_short'] = proc_show['procedure_name'].apply(
+            lambda x: (x[:15] + '…') if isinstance(x, str) and len(x) > 15 else x)
         proc_show['avg_min'] = proc_show['avg_min'].fillna(0).round(0).astype(int)
-        fig = px.bar(proc_show, x='n', y='label', orientation='h',
-                     text='n',
-                     labels={'n': 'จำนวนเคส', 'label': 'หัตถการ'},
-                     color_discrete_sequence=['#26a69a'],
-                     hover_data={'avg_min': True})
-        fig.update_layout(
-            margin=dict(t=10, b=10, l=10, r=10), height=max(240, len(proc_show) * 32),
-            yaxis=dict(autorange='reversed'),
-        )
-        fig.update_traces(textposition='outside')
+        if _is_v:
+            _y_max_proc = max(int(proc_show['n'].max()) * 1.20, 5)
+            fig = px.bar(proc_show, x='label_short', y='n', text='n',
+                         labels={'n': 'จำนวนเคส', 'label_short': 'หัตถการ'},
+                         color_discrete_sequence=['#26a69a'],
+                         hover_data={'label_full': True, 'avg_min': True,
+                                     'label_short': False})
+            fig.update_traces(
+                textposition='outside',
+                hovertemplate='<b>%{customdata[0]}</b><br>%{y} เคส<br>'
+                              'เฉลี่ย %{customdata[1]} นาที<extra></extra>')
+            fig.update_layout(
+                margin=dict(t=30, b=120, l=40, r=10),
+                height=max(340, 80 + len(proc_show) * 24),
+                xaxis=dict(tickangle=-45, title='หัตถการ'),
+                yaxis=dict(title='จำนวนเคส', range=[0, _y_max_proc]),
+            )
+        else:
+            fig = px.bar(proc_show, x='n', y='label_full', orientation='h',
+                         text='n',
+                         labels={'n': 'จำนวนเคส', 'label_full': 'หัตถการ'},
+                         color_discrete_sequence=['#26a69a'],
+                         hover_data={'avg_min': True})
+            _x_max_proc = max(int(proc_show['n'].max()) * 1.12, 5)
+            fig.update_traces(textposition='outside')
+            fig.update_layout(
+                margin=dict(t=10, b=10, l=10, r=40),
+                height=max(240, len(proc_show) * 32),
+                yaxis=dict(autorange='reversed'),
+                xaxis=dict(range=[0, _x_max_proc]),
+            )
         st.plotly_chart(fig, use_container_width=True)
         st.caption("💡 ระบบรวมหัตถการที่คล้ายกันโดยอัตโนมัติ (เช่น Off PERM/TCC, nail extraction)")
     else:
         st.caption("ยังไม่มีข้อมูลหัตถการ")
 
-    # ── 👨‍⚕️ Top 5 แพทย์ (ดึงจาก intraop) — อยู่ในกลุ่มอันดับยอดนิยม ──
+    # ── 👨‍⚕️ Top 5 แพทย์ (แนวนอนเสมอ + ตัดยศ/คำนำหน้าออก) ──
     from minor_or_db import get_cases as _get_cases_for_surg
     _df_surg = _get_cases_for_surg()
     _df_surg = _df_surg[(_df_surg['op_date'] >= date_from) &
                         (_df_surg['op_date'] <= date_to) &
                         (_df_surg['status'] != 'cancelled')]
-    st.markdown('<div class="sub-title">👨‍⚕️ Top 5 แพทย์ (จากข้อมูล intraop)</div>',
+    st.markdown('<div class="sub-title">👨‍⚕️ Top 5 แพทย์</div>',
                 unsafe_allow_html=True)
     if not _df_surg.empty and 'surgeon_name' in _df_surg.columns:
-        _surg = _df_surg.dropna(subset=['surgeon_name'])
+        _surg = _df_surg.dropna(subset=['surgeon_name']).copy()
         _surg = _surg[_surg['surgeon_name'].astype(str).str.strip() != '']
+        # 🪒 ตัดยศ/คำนำหน้าออก (พ.ต.อ., นพ., พญ., นาย, นาง ฯลฯ)
+        _surg['surgeon_clean'] = _surg['surgeon_name'].apply(
+            _normalize_nurse_name)
+        # กรองเคสที่ชื่อหลัง normalize ยังว่าง
+        _surg = _surg[_surg['surgeon_clean'].astype(str).str.strip() != '']
         if not _surg.empty:
-            _top_surg = (_surg['surgeon_name'].value_counts()
+            _top_surg = (_surg['surgeon_clean'].value_counts()
                          .head(5).reset_index())
             _top_surg.columns = ['surgeon', 'n_cases']
-            _max_surg = _top_surg['n_cases'].max()
-            _top_surg['pct'] = (_top_surg['n_cases'] / _max_surg * 100)
-            _purple_shades = ['#5e35b1', '#7e57c2', '#9575cd',
-                              '#b39ddb', '#d1c4e9']
-            for i, row in _top_surg.iterrows():
-                _color = _purple_shades[i] if i < 5 else '#d1c4e9'
-                _text_color = '#4527a0' if i >= 4 else _color
-                st.markdown(
-                    f'<div style="display:flex;align-items:center;gap:10px;'
-                    f'padding:6px 0;">'
-                    f'<div style="background:{_color};color:white;'
-                    f'width:26px;height:26px;border-radius:50%;display:flex;'
-                    f'align-items:center;justify-content:center;font-size:12px;'
-                    f'font-weight:600;">{i+1}</div>'
-                    f'<div style="flex:1;">'
-                    f'<div style="font-size:13px;color:#263238;">'
-                    f'{row["surgeon"]}</div>'
-                    f'<div style="background:#ede7f6;height:6px;'
-                    f'border-radius:3px;margin-top:3px;">'
-                    f'<div style="background:{_color};width:{row["pct"]:.0f}%;'
-                    f'height:100%;border-radius:3px;"></div></div></div>'
-                    f'<div style="font-size:14px;font-weight:600;'
-                    f'color:{_text_color};min-width:60px;text-align:right;">'
-                    f'{row["n_cases"]} เคส</div></div>',
-                    unsafe_allow_html=True)
+            # แนวนอนเสมอ — ไม่ตาม toggle (ชื่อยาว ต้องเห็นเต็ม)
+            fig = px.bar(_top_surg, x='n_cases', y='surgeon',
+                         orientation='h', text='n_cases',
+                         labels={'n_cases': 'จำนวนเคส', 'surgeon': 'แพทย์'},
+                         color_discrete_sequence=['#5e35b1'])
+            _x_max_s = max(int(_top_surg['n_cases'].max()) * 1.12, 5)
+            fig.update_traces(
+                textposition='outside',
+                hovertemplate='<b>%{y}</b><br>%{x} เคส<extra></extra>')
+            fig.update_layout(
+                margin=dict(t=10, b=10, l=10, r=40), height=280,
+                yaxis=dict(autorange='reversed'),
+                xaxis=dict(range=[0, _x_max_s]),
+            )
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.caption("ยังไม่มีข้อมูล surgeon_name")
     else:
         st.caption("ยังไม่มีข้อมูล surgeon_name")
 
-    # ════════════════════════════════════════════════════════════════
-    # 4.5️⃣  👥 Progress รายบุคคล (PIN-protected)
-    # ════════════════════════════════════════════════════════════════
-    st.markdown('<div class="group-header" style="color:#5e35b1;background:#ede7f6;'
-                'border-left-color:#5e35b1;">👥 Progress รายบุคคล</div>',
+    # ── 🔍 ดูรายละเอียดแพทย์รายคน (sub-section ของ Top 5 แพทย์) ──
+    st.markdown('<div class="sub-title">🔍 ดูรายละเอียดแพทย์รายคน</div>',
                 unsafe_allow_html=True)
-    with st.expander("💡 อธิบายส่วนนี้", expanded=False):
-        st.markdown("""
-ดู **ผลงานของพยาบาลแต่ละคน** ในช่วงเวลาที่เลือก
-- 🔒 **ป้องกัน PIN** (ข้อมูลส่วนตัว)
-- 🧑‍⚕️ **เลือกพยาบาล** → เห็น scrub/circulate ที่ทำ + หัตถการที่ทำ
-- ✨ **Real-time** — นับทันทีเมื่อพยาบาลกดบันทึกในแอป (ไม่ต้องรอ upload HIS)
-""")
-    _render_nurse_progress_history(date_from, date_to)
+    from minor_or_db import get_surgeon_list, get_surgeon_detail
+    # ใช้ sort by 'actual' (จำนวนผ่าตัด) — สอดคล้องกับ Top 5 ด้านบน
+    _surg_list = get_surgeon_list(date_from, date_to, sort_by='actual')
+
+    if _surg_list.empty:
+        st.caption("ยังไม่มีข้อมูลแพทย์ในช่วงนี้")
+    else:
+        # Dropdown: Top 15 แพทย์ — default ว่าง รอผู้ใช้เลือก
+        _top_surg_list = _surg_list.head(15).copy()
+        _options = [
+            f"{row['surgeon']} — set {row['n_scheduled']} / "
+            f"ผ่าตัด {row['n_actual']} เคส"
+            for _, row in _top_surg_list.iterrows()
+        ]
+        _name_map = dict(zip(_options, _top_surg_list['surgeon']))
+        _selected_label = st.selectbox(
+            "เลือกแพทย์เพื่อดูรายละเอียด",
+            options=_options, key='surgeon_detail_select',
+            index=None,
+            placeholder='-- เลือกแพทย์เพื่อดูรายละเอียด --',
+        )
+
+        if _selected_label is None:
+            st.caption("👆 เลือกแพทย์จาก dropdown ด้านบนเพื่อดู KPI + หัตถการที่ทำ")
+        else:
+            _selected_surgeon = _name_map[_selected_label]
+
+            # ดึงรายละเอียด
+            _detail = get_surgeon_detail(_selected_surgeon, date_from, date_to)
+
+            # ชื่อแพทย์
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,#fafafa,white);'
+                f'border-radius:10px;padding:10px 14px;margin:8px 0;'
+                f'border:0.5px solid #e0e0e0;">'
+                f'<div style="font-size:16px;font-weight:600;color:#4a148c;">'
+                f'👨‍⚕️ {_selected_surgeon}</div></div>',
+                unsafe_allow_html=True)
+
+            # 3 KPI cards
+            kc1, kc2, kc3 = st.columns(3)
+            with kc1:
+                st.markdown(
+                    f'<div style="background:#e3f2fd;border-left:5px solid #1976d2;'
+                    f'border-radius:10px;padding:12px;">'
+                    f'<div style="font-size:11px;color:#1565c0;">📋 เคสที่ set ผ่าตัดทั้งหมด</div>'
+                    f'<div style="font-size:30px;font-weight:600;color:#0d47a1;'
+                    f'line-height:1.1;margin:4px 0;">{_detail["n_scheduled"]}</div>'
+                    f'<div style="font-size:11px;color:#1565c0;">เคส</div>'
+                    f'</div>', unsafe_allow_html=True)
+            with kc2:
+                st.markdown(
+                    f'<div style="background:#e8f5e9;border-left:5px solid #2e7d32;'
+                    f'border-radius:10px;padding:12px;">'
+                    f'<div style="font-size:11px;color:#1b5e20;">🩺 เคสที่ผ่าตัด</div>'
+                    f'<div style="font-size:30px;font-weight:600;color:#1b5e20;'
+                    f'line-height:1.1;margin:4px 0;">{_detail["n_actual"]}</div>'
+                    f'<div style="font-size:11px;color:#1b5e20;">เคส</div>'
+                    f'</div>', unsafe_allow_html=True)
+            with kc3:
+                st.markdown(
+                    f'<div style="background:#fff3e0;border-left:5px solid #ef6c00;'
+                    f'border-radius:10px;padding:12px;">'
+                    f'<div style="font-size:11px;color:#bf360c;">🤝 มอบหมายให้ resident</div>'
+                    f'<div style="font-size:30px;font-weight:600;color:#bf360c;'
+                    f'line-height:1.1;margin:4px 0;">{_detail["n_delegated"]}</div>'
+                    f'<div style="font-size:11px;color:#bf360c;">เคส</div>'
+                    f'</div>', unsafe_allow_html=True)
+
+            # Top procedures (จากที่ทำจริง)
+            _top_proc = _detail['top_procedures']
+            if not _top_proc.empty:
+                st.markdown(
+                    '<div style="font-size:13px;color:#37474f;margin:14px 0 6px;'
+                    'font-weight:500;">🔬 หัตถการที่ทำ (Top 5)</div>',
+                    unsafe_allow_html=True)
+                _x_max_p = max(int(_top_proc['n_cases'].max()) * 1.15, 5)
+                fig_p = px.bar(_top_proc, x='n_cases', y='procedure',
+                               orientation='h', text='n_cases',
+                               labels={'n_cases': 'จำนวนเคส',
+                                       'procedure': 'หัตถการ'},
+                               color_discrete_sequence=['#00838f'])
+                fig_p.update_traces(
+                    textposition='outside',
+                    hovertemplate='<b>%{y}</b><br>%{x} เคส<extra></extra>')
+                fig_p.update_layout(
+                    margin=dict(t=10, b=10, l=10, r=40),
+                    height=max(220, len(_top_proc) * 40 + 80),
+                    yaxis=dict(autorange='reversed'),
+                    xaxis=dict(range=[0, _x_max_p]),
+                )
+                st.plotly_chart(fig_p, use_container_width=True)
+            else:
+                st.caption("ยังไม่มีหัตถการที่ทำจริง (intraop) สำหรับแพทย์คนนี้")
 
     # ════════════════════════════════════════════════════════════════
     # 5️⃣  ⏱️ ประสิทธิภาพการให้บริการ — เวลารอ + รับเวร + Turnover
@@ -2308,69 +2508,6 @@ def _render_historical_analytics(date_from: str, date_to: str):
                 f"**{_in_target}/{_total} ครั้ง ({_pct_in}%)**")
 
     # ════════════════════════════════════════════════════════════════
-    # 5.5️⃣  📅 เฉลี่ยตามวันในสัปดาห์
-    # ════════════════════════════════════════════════════════════════
-
-    # ── โหลด _df_daily สำหรับ sub-sections ──
-    from minor_or_db import get_cases as _get_cases_for_daily
-    _df_daily = _get_cases_for_daily()
-    _df_daily = _df_daily[(_df_daily['op_date'] >= date_from) &
-                          (_df_daily['op_date'] <= date_to) &
-                          (_df_daily['status'] != 'cancelled')]
-    if not _df_daily.empty:
-        # ── 5.5.2 เฉลี่ยตามวันในสัปดาห์ ──
-        st.markdown('<div class="sub-title">📊 เฉลี่ยเคสตามวันในสัปดาห์ '
-                    '(วันไหนงานหนักสุด)</div>',
-                    unsafe_allow_html=True)
-        _dow_df = _df_daily.copy()
-        _dow_df['_dt'] = pd.to_datetime(_dow_df['op_date'])
-        _dow_df['dow'] = _dow_df['_dt'].dt.dayofweek
-        _dow_only = _dow_df[_dow_df['dow'].between(0, 4)]
-        # นับเคสต่อ (วัน × dow) แล้วเฉลี่ย
-        _daily_dow = (_dow_only.groupby(['op_date', 'dow'])
-                      .size().reset_index(name='n'))
-        _dow_avg = (_daily_dow.groupby('dow')['n'].mean()
-                    .round(1).reset_index())
-        _THAI_DAY = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสฯ', 'ศุกร์']
-        # เติม dow ที่ขาด
-        _all_dow = pd.DataFrame({'dow': range(5)})
-        _dow_avg = _all_dow.merge(_dow_avg, on='dow', how='left').fillna(0)
-        _dow_avg['day_name'] = _dow_avg['dow'].apply(lambda d: _THAI_DAY[d])
-        _max_dow_avg = _dow_avg['n'].max()
-        _max_dow_name = _dow_avg.loc[_dow_avg['n'].idxmax(), 'day_name']
-        _dow_avg['color_flag'] = _dow_avg['n'].apply(
-            lambda v: 'peak' if v == _max_dow_avg and v > 0 else 'normal')
-
-        fig_dow_avg = px.bar(_dow_avg, x='day_name', y='n', text='n',
-                             color='color_flag',
-                             color_discrete_map={
-                                 'peak': '#c62828', 'normal': '#4fc3f7'},
-                             labels={'day_name': '', 'n': 'เคสเฉลี่ย/วัน'})
-        fig_dow_avg.update_traces(
-            textposition='outside',
-            hovertemplate='<b>%{x}</b><br>เฉลี่ย %{y} เคส/วัน<extra></extra>')
-        _y_max_dow = max(float(_dow_avg['n'].max()), 1.0)
-        fig_dow_avg.update_layout(
-            margin=dict(t=40, b=30, l=40, r=10), height=240,
-            xaxis_title='',
-            yaxis=dict(title='เคสเฉลี่ย/วัน',
-                       range=[0, _y_max_dow * 1.25]),
-            showlegend=False,
-        )
-        st.plotly_chart(fig_dow_avg, use_container_width=True)
-        # Insight
-        _min_dow_avg = _dow_avg[_dow_avg['n'] > 0]['n'].min()
-        if _min_dow_avg > 0:
-            _pct_heavier = round((_max_dow_avg / _min_dow_avg - 1) * 100)
-            st.markdown(
-                f'<div style="background:#ffebee;border-left:3px solid #c62828;'
-                f'padding:8px 12px;border-radius:0 6px 6px 0;'
-                f'font-size:12px;color:#b71c1c;margin-top:6px;">'
-                f'<b>วัน{_max_dow_name}</b> หนักสุด เฉลี่ย {_max_dow_avg} เคส/วัน · '
-                f'หนักกว่าวันที่น้อยที่สุด {_pct_heavier}%</div>',
-                unsafe_allow_html=True)
-
-    # ════════════════════════════════════════════════════════════════
     # 6️⃣  🌙 เคสนอกเวลา (สะสม)
     # ════════════════════════════════════════════════════════════════
     st.markdown('<div class="group-header indigo">🌙 เคสนอกเวลา (สะสม)</div>',
@@ -2390,6 +2527,21 @@ def _render_historical_analytics(date_from: str, date_to: str):
         a2.metric("ยืนยันแล้ว", len(aft_range[aft_range['status'] == 'discharged']))
         a3.metric("ยกเลิก", len(aft_range[aft_range['status'] == 'cancelled']))
         # a4.metric("💰 รายได้", f"{int(aft_range['treatment_cost'].fillna(0).sum()):,} ฿")
+
+    # ════════════════════════════════════════════════════════════════
+    # 6.5️⃣  👥 Progress รายบุคคล (PIN-protected) — ย้ายมาหลัง เคสนอกเวลา
+    # ════════════════════════════════════════════════════════════════
+    st.markdown('<div class="group-header" style="color:#5e35b1;background:#ede7f6;'
+                'border-left-color:#5e35b1;">👥 Progress รายบุคคล</div>',
+                unsafe_allow_html=True)
+    with st.expander("💡 อธิบายส่วนนี้", expanded=False):
+        st.markdown("""
+ดู **ผลงานของพยาบาลแต่ละคน** ในช่วงเวลาที่เลือก
+- 🔒 **ป้องกัน PIN** (ข้อมูลส่วนตัว)
+- 🧑‍⚕️ **เลือกพยาบาล** → เห็น scrub/circulate ที่ทำ + หัตถการที่ทำ
+- ✨ **Real-time** — นับทันทีเมื่อพยาบาลกดบันทึกในแอป (ไม่ต้องรอ upload HIS)
+""")
+    _render_nurse_progress_history(date_from, date_to)
 
     # ════════════════════════════════════════════════════════════════
     # 7️⃣  💾 Export ข้อมูล

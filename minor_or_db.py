@@ -484,6 +484,9 @@ def init_db():
             post_op_dest     TEXT DEFAULT 'transfer',
             treatment_cost   INTEGER DEFAULT 0,
 
+            -- Scheduled surgeon (from schedule.csv) — ไม่ overwrite ตอน intraop import
+            scheduled_surgeon TEXT,
+
             -- Meta
             created_at       TEXT DEFAULT (datetime('now','localtime')),
             updated_at       TEXT DEFAULT (datetime('now','localtime'))
@@ -683,6 +686,20 @@ def _migrate_v2(conn):
         except Exception:
             pass
         existing.add('diagnosis')
+
+    # Add scheduled_surgeon column if missing
+    # ใช้เก็บแพทย์ที่ "set" ผ่าตัด (จาก schedule.csv) — ไม่ overwrite ตอน intraop import
+    if 'scheduled_surgeon' not in existing:
+        try:
+            conn.execute("ALTER TABLE cases ADD COLUMN scheduled_surgeon TEXT")
+            # Backfill: ใช้ surgeon_name ปัจจุบันเป็น scheduled_surgeon (best-effort)
+            conn.execute(
+                "UPDATE cases SET scheduled_surgeon = surgeon_name "
+                "WHERE scheduled_surgeon IS NULL AND surgeon_name IS NOT NULL")
+            conn.commit()
+        except Exception:
+            pass
+        existing.add('scheduled_surgeon')
 
     needs_recreate = has_check or ('arrived_at' not in existing)
 
@@ -1027,15 +1044,20 @@ def import_schedule(df: pd.DataFrame, op_date: str) -> int:
         diag_val = data.get('diagnosis', '').strip()
         if diag_val.upper() in ('', 'NAN', 'NONE', '-'):
             diag_val = None
+        # scheduled_surgeon = แพทย์ที่ set ผ่าตัด (จาก schedule)
+        # surgeon_name = ตอน import schedule = ผู้ set
+        # หลัง intraop import → surgeon_name จะถูกอัพเดตเป็นผู้ทำจริง
+        _sched_surg = data.get('surgeon_name')
         conn.execute("""
             INSERT INTO cases (op_date, name, hn, an, diagnosis, procedure_name,
-                              surgeon_name, division_code, case_category, patient_type,
+                              surgeon_name, scheduled_surgeon,
+                              division_code, case_category, patient_type,
                               op_type, estimated_time, procnote, anesthesia_type,
                               oss_by_or, or_pre_visit, ai_predicted_min, room_no)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             op_date, data.get('name'), data.get('hn'),
-            an_val, diag_val, proc, data.get('surgeon_name'),
+            an_val, diag_val, proc, _sched_surg, _sched_surg,
             data.get('division_code'),
             cls['case_category'], cls['patient_type'], data.get('op_type'),
             data.get('estimated_time'), data.get('procnote'),
@@ -2175,6 +2197,145 @@ def get_turnover_stats(date_from: str = None, date_to: str = None,
         'heatmap': heatmap,
         'raw': tdf[['op_date', 'room_no', 'turnover_min']].copy(),
     }
+
+
+def get_surgeon_list(date_from: str = None, date_to: str = None,
+                     sort_by: str = 'scheduled') -> pd.DataFrame:
+    """รายชื่อแพทย์ + จำนวนเคส set/ทำจริง/มอบหมาย
+
+    sort_by: 'scheduled' (เรียงตามที่ set) หรือ 'actual' (เรียงตามที่ทำจริง)
+
+    Returns DataFrame: surgeon, n_scheduled, n_actual, n_delegated
+    """
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """SELECT scheduled_surgeon, surgeon_name
+           FROM cases
+           WHERE op_date BETWEEN ? AND ?
+             AND status != 'cancelled'""",
+        conn, params=(date_from or '1900-01-01', date_to or '2999-12-31'))
+    conn.close()
+    if df.empty:
+        return pd.DataFrame(columns=['surgeon', 'n_scheduled',
+                                     'n_actual', 'n_delegated'])
+
+    # Normalize ทั้ง 2 คอลัมน์ (ตัดยศ/คำนำหน้า)
+    df['sched_clean'] = df['scheduled_surgeon'].fillna('').astype(str).apply(
+        _normalize_proxy_for_surgeon)
+    df['actual_clean'] = df['surgeon_name'].fillna('').astype(str).apply(
+        _normalize_proxy_for_surgeon)
+
+    # นับ scheduled / actual / delegated
+    n_sched = (df[df['sched_clean'] != '']
+               .groupby('sched_clean').size()
+               .reset_index(name='n_scheduled'))
+    n_sched.columns = ['surgeon', 'n_scheduled']
+
+    n_actual = (df[df['actual_clean'] != '']
+                .groupby('actual_clean').size()
+                .reset_index(name='n_actual'))
+    n_actual.columns = ['surgeon', 'n_actual']
+
+    # Delegated = scheduled แต่ ไม่ตรงกับ actual ในเคสเดียวกัน
+    df['is_delegated'] = (
+        (df['sched_clean'] != '') & (df['actual_clean'] != '') &
+        (df['sched_clean'] != df['actual_clean']))
+    n_del = (df[df['is_delegated']]
+             .groupby('sched_clean').size()
+             .reset_index(name='n_delegated'))
+    n_del.columns = ['surgeon', 'n_delegated']
+
+    # Merge
+    out = n_sched.merge(n_actual, on='surgeon', how='outer')
+    out = out.merge(n_del, on='surgeon', how='outer')
+    out = out.fillna(0)
+    for c in ['n_scheduled', 'n_actual', 'n_delegated']:
+        out[c] = out[c].astype(int)
+    # เรียง
+    sort_col = 'n_scheduled' if sort_by == 'scheduled' else 'n_actual'
+    out = out.sort_values(sort_col, ascending=False).reset_index(drop=True)
+    # ตัดแถวที่ scheduled=0 AND actual=0
+    out = out[(out['n_scheduled'] > 0) | (out['n_actual'] > 0)]
+    return out
+
+
+def get_surgeon_detail(surgeon: str, date_from: str = None,
+                       date_to: str = None) -> dict:
+    """รายละเอียดแพทย์รายคน — counts + Top procedures (จาก intraop)
+
+    surgeon: ชื่อหลัง normalize (ตัดยศแล้ว)
+
+    Returns dict: n_scheduled, n_actual, n_delegated,
+                  top_procedures (DataFrame)
+    """
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """SELECT scheduled_surgeon, surgeon_name, procedure_name, op_date
+           FROM cases
+           WHERE op_date BETWEEN ? AND ?
+             AND status != 'cancelled'""",
+        conn, params=(date_from or '1900-01-01', date_to or '2999-12-31'))
+    conn.close()
+    if df.empty:
+        return {'n_scheduled': 0, 'n_actual': 0, 'n_delegated': 0,
+                'top_procedures': pd.DataFrame()}
+
+    df['sched_clean'] = df['scheduled_surgeon'].fillna('').astype(str).apply(
+        _normalize_proxy_for_surgeon)
+    df['actual_clean'] = df['surgeon_name'].fillna('').astype(str).apply(
+        _normalize_proxy_for_surgeon)
+
+    n_sched = int((df['sched_clean'] == surgeon).sum())
+    n_actual = int((df['actual_clean'] == surgeon).sum())
+    n_del = int(((df['sched_clean'] == surgeon) &
+                 (df['actual_clean'] != '') &
+                 (df['actual_clean'] != surgeon)).sum())
+
+    # Top procedures — นับจากที่แพทย์คนนี้ "ทำจริง" (actual)
+    actual_cases = df[df['actual_clean'] == surgeon].copy()
+    if not actual_cases.empty:
+        actual_cases['proc'] = actual_cases['procedure_name'].fillna('-').apply(
+            _normalize_procedure_name)
+        top_proc = (actual_cases.groupby('proc')
+                    .size().reset_index(name='n_cases')
+                    .sort_values('n_cases', ascending=False).head(5))
+        top_proc.columns = ['procedure', 'n_cases']
+    else:
+        top_proc = pd.DataFrame(columns=['procedure', 'n_cases'])
+
+    return {
+        'n_scheduled': n_sched,
+        'n_actual': n_actual,
+        'n_delegated': n_del,
+        'top_procedures': top_proc,
+    }
+
+
+# ===== Surgeon name normalizer (proxy ที่ใช้ _normalize_nurse_name) =====
+# Used by get_surgeon_list / get_surgeon_detail
+def _normalize_proxy_for_surgeon(name) -> str:
+    """Wrapper เรียก normalize ที่อยู่ใน minor_or_admin.py (ผ่าน import lazy)"""
+    if not name or not isinstance(name, str):
+        return ''
+    s = name.strip()
+    if not s:
+        return ''
+    # ลบ ยศ/คำนำหน้า ด้วย regex inline (เลี่ยง circular import)
+    import re as _re
+    _TITLE_RE = _re.compile(
+        r'^\s*(?:ว่าที่\s*)?'
+        r'(?:พล\.?ต\.?[อทต]\.?|พ\.?ต\.?[อทต]\.?|ร\.?ต\.?[อทต]\.?|ด\.?ต\.?|'
+        r'จ\.?ส\.?ต\.?|จ\.?ส\.?[อทต]\.?|ส\.?ต\.?[อทต]\.?|'
+        r'พล\.?[อทต]\.?|พล\.?จ\.?|พ\.?[อทต]\.?|ร\.?[อทต]\.?|'
+        r'นาย|นาง|นางสาว|น\.?ส\.?|'
+        r'เด็กชาย|เด็กหญิง|ด\.?ช\.?|ด\.?ญ\.?|'
+        r'แพทย์หญิง|แพทย์ชาย|นพ\.?|พญ\.?|'
+        r'ดร\.?|ผศ\.?|รศ\.?|ศ\.?)\s*(?:หญิง|ชาย)?\s+')
+    prev = None
+    while prev != s:
+        prev = s
+        s = _TITLE_RE.sub('', s)
+    return _re.sub(r'\s+', ' ', s).strip()
 
 
 def get_on_time_start_stats(date_from: str = None, date_to: str = None,

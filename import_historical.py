@@ -279,16 +279,19 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
             })
         else:
             if not dry_run:
+                # scheduled_surgeon = surgeon (initial value) — bulk import มาจาก merged data
+                # ถ้า upload schedule.csv ใหม่จะใช้ surgeon จาก dctnm ตรงๆ
                 conn.execute("""
                     INSERT INTO cases (op_date, name, hn, an, diagnosis, procedure_name,
-                                      surgeon_name, division_code, case_category, patient_type,
+                                      surgeon_name, scheduled_surgeon,
+                                      division_code, case_category, patient_type,
                                       op_type, status, arrived_at, in_or_at, op_end_at, discharged_at,
                                       actual_duration_min, scrub_nurse, circ_nurse,
                                       wait_min, room_no, procnote, requested_date)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     op_date, name, hn, an_val, diag, proc,
-                    surgeon, division, case_cat, pt_type,
+                    surgeon, surgeon, division, case_cat, pt_type,
                     op_type, status, arrived_at, in_or_at, op_end_at, discharged_at,
                     actual_min, scrub, circ,
                     wait_min, room_no, procnote, req_date,
