@@ -400,8 +400,66 @@ def reimport_timestamps(intra_path: str, dry_run: bool = False):
     ใช้ตอนเปลี่ยน column mapping ของ in_or_at/op_end_at เช่น เปลี่ยนจาก
     opesttime/opendtime → roomtimein/roomtimeout — ทำให้ heatmap "ช่วงเวลาที่ยุ่ง"
     ใช้ค่า room-in/room-out จริง (มาตรฐาน OR utilization)
+
+    รองรับไฟล์: .csv (utf-16, utf-8, cp874), .xls (BIFF/HTML), .xlsx
     """
-    intra = pd.read_csv(intra_path, encoding='utf-16')
+    import os
+    _ext = os.path.splitext(intra_path)[1].lower()
+    intra = None
+    last_err = None
+
+    # 1. CSV — ลองหลาย encoding
+    if _ext == '.csv' or intra is None:
+        for enc in ('utf-16', 'utf-8', 'utf-8-sig', 'cp874', 'tis-620'):
+            try:
+                intra = pd.read_csv(intra_path, encoding=enc)
+                break
+            except (UnicodeDecodeError, UnicodeError) as e:
+                last_err = e
+                continue
+            except Exception as e:
+                last_err = e
+                break
+
+    # 2. xlsx — openpyxl
+    if intra is None and _ext == '.xlsx':
+        try:
+            intra = pd.read_excel(intra_path, engine='openpyxl')
+        except Exception as e:
+            last_err = e
+
+    # 3. xls — ลอง xlrd → html → openpyxl
+    if intra is None and _ext == '.xls':
+        for engine in ('xlrd', 'openpyxl'):
+            try:
+                intra = pd.read_excel(intra_path, engine=engine)
+                break
+            except Exception as e:
+                last_err = e
+                continue
+        if intra is None:
+            # HIS export มักเป็น HTML disguised as .xls
+            try:
+                tables = pd.read_html(intra_path)
+                if tables:
+                    intra = tables[0]
+            except Exception as e:
+                last_err = e
+
+    if intra is None:
+        raise ValueError(
+            f"อ่านไฟล์ {intra_path} ไม่ได้ — ลองทุก format/encoding แล้ว "
+            f"(last error: {last_err})\n"
+            f"💡 ทางแก้: เปิดใน Excel → Save As → xlsx → upload ใหม่"
+        )
+
+    # Validate required columns
+    if 'opedate' not in intra.columns or 'hn' not in intra.columns:
+        raise ValueError(
+            f"ไฟล์ขาดคอลัมน์ที่จำเป็น (ต้องมี: opedate, hn) — "
+            f"พบ: {list(intra.columns)[:10]}..."
+        )
+
     intra['_op_date'] = intra['opedate'].apply(_norm_date)
     intra['_hn'] = intra['hn'].astype(str).str.strip()
 
@@ -481,6 +539,7 @@ def reimport_timestamps(intra_path: str, dry_run: bool = False):
     return {
         'updated': updated, 'not_found': not_found, 'changed': changed,
         'samples': samples,
+        'total': len(intra),  # จำนวน rows ในไฟล์ intraop
     }
 
 

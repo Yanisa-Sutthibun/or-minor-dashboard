@@ -1318,8 +1318,13 @@ def update_postcall(case_id: int, status_text: str):
 
 
 def get_summary(date_from=None, date_to=None) -> dict:
+    """สรุปยอดสะสม — ใช้ filter เดียวกับ KPI Highlights
+    (status IN post_op/discharged/done) เพื่อให้ตัวเลข "เคสรวม" = "เคสสะสม" ตรงกัน
+    เคสสะสม = เคสที่มี **ทั้ง schedule + intraop data** (ผ่าตัดสำเร็จจริง)
+    """
     conn = get_conn()  # read-only, no commit needed
-    where = "WHERE 1=1"
+    # 🆕 ใช้ DONE filter เดียวกับ KPI → ตัวเลขตรงกันทุกที่
+    where = f"WHERE status IN {_DONE_STATUSES}"
     params = []
     if date_from:
         where += " AND op_date >= ?"
@@ -1332,8 +1337,10 @@ def get_summary(date_from=None, date_to=None) -> dict:
         return conn.execute(sql, params).fetchone()[0]
 
     total = q1(f"SELECT COUNT(*) FROM cases {where}")
-    completed = q1(f"SELECT COUNT(*) FROM cases {where} AND status='discharged'")
-    cancelled = q1(f"SELECT COUNT(*) FROM cases {where} AND status='cancelled'")
+    completed = total  # เคสในรายการนี้ = เคสสำเร็จทั้งหมด
+    # cancelled — query แยก (ไม่นับใน total) เพื่อแสดงเป็นข้อมูลเสริม
+    cancelled_where = where.replace(f"status IN {_DONE_STATUSES}", "status='cancelled'")
+    cancelled = q1(f"SELECT COUNT(*) FROM cases {cancelled_where}")
     n_set = q1(f"SELECT COUNT(*) FROM cases {where} AND case_category IN ('SET','เคสนัดหมาย')")
     n_walkin = q1(f"SELECT COUNT(*) FROM cases {where} AND case_category IN ('WALK-IN','Walk-in')")
     n_opd = q1(f"SELECT COUNT(*) FROM cases {where} AND patient_type='OPD'")
@@ -1408,7 +1415,10 @@ def get_db_stats() -> dict:
     pending_calls = conn.execute(
         "SELECT COUNT(*) FROM cases WHERE status='discharged' AND patient_type != 'IPD' AND post_call=0 AND op_date >= ?",
         ((_now_dt() - timedelta(days=7)).strftime('%Y-%m-%d'),)).fetchone()[0]
-    total_all = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
+    # 🆕 total_all = เฉพาะเคสที่ผ่าตัดสำเร็จ (consistent กับ KPI)
+    total_all = conn.execute(
+        f"SELECT COUNT(*) FROM cases WHERE status IN {_DONE_STATUSES}"
+    ).fetchone()[0]
     conn.close()
     return {
         'today': today_total,

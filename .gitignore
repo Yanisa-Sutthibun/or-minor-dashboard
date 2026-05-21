@@ -16,3 +16,6 @@ db_fix.py
 
 # ไฟล์เก่าที่ไม่ใช้
 minor_or_app_complete.py
+
+# 🔒 Secrets (Streamlit) — ห้าม commit password
+.streamlit/secrets.toml

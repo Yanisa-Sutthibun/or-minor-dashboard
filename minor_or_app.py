@@ -454,11 +454,80 @@ def page_plan_schedule():
 # MAIN
 # ============================================================================
 
+def _check_password():
+    """🔒 Password gate — แสดง login form ถ้ายังไม่ได้ authenticate.
+    Return True ถ้าผ่านแล้ว / False ถ้ายังไม่ผ่าน (และจะแสดง login form)
+    """
+    # ถ้าไม่มี password ใน secrets → bypass (สำหรับ local dev)
+    try:
+        _pwd_set = st.secrets.get('app_password', None)
+    except Exception:
+        _pwd_set = None
+    if not _pwd_set:
+        return True  # No password configured — allow access (local dev)
+
+    if st.session_state.get('authenticated'):
+        return True
+
+    # Login screen
+    st.markdown("""
+    <style>
+    .login-card {
+        max-width: 420px; margin: 80px auto; padding: 32px;
+        background: white; border-radius: 16px;
+        border: 0.5px solid #e0e0e0;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _l, _c, _r = st.columns([1, 2, 1])
+    with _c:
+        st.markdown(
+            '<div style="text-align:center;margin:60px 0 24px;">'
+            '<div style="font-size:48px;">🔒</div>'
+            '<div style="font-size:22px;font-weight:600;color:#263238;'
+            'margin-top:8px;">OR Dashboard — Demo</div>'
+            '<div style="font-size:13px;color:#607d8b;margin-top:4px;">'
+            'ใส่รหัสผ่านเพื่อเข้าใช้งาน</div></div>',
+            unsafe_allow_html=True)
+
+        with st.form("login_form", clear_on_submit=False):
+            pwd = st.text_input("รหัสผ่าน", type="password",
+                                placeholder="••••••••",
+                                label_visibility='collapsed')
+            submit = st.form_submit_button("🔓 เข้าสู่ระบบ",
+                                            use_container_width=True,
+                                            type='primary')
+            if submit:
+                if pwd == _pwd_set:
+                    st.session_state['authenticated'] = True
+                    st.rerun()
+                else:
+                    st.error("❌ รหัสผ่านไม่ถูกต้อง")
+
+        st.caption("💡 รหัสผ่านจากเจ้าของแอป — กรุณาอย่าแชร์สาธารณะ")
+
+    return False
+
+
 def main():
+    # 🔒 Password gate ก่อนทุก action
+    if not _check_password():
+        st.stop()
+
     # Initialize DB on startup
     init_db()
 
     with st.sidebar:
+        # 🔓 Logout button
+        if st.session_state.get('authenticated'):
+            if st.button("🔒 ออกจากระบบ", use_container_width=True,
+                         key='_logout_btn'):
+                st.session_state['authenticated'] = False
+                st.rerun()
+            st.markdown("---")
+
         st.markdown(
             '<div style="text-align:center;padding:20px 0;">'
             '<h2 style="color:#2c3e50;margin:0;">🏥 Minor OR</h2>'
@@ -468,10 +537,26 @@ def main():
         )
         st.markdown("---")
 
+        # Persist page selection via URL — survives full browser refresh
+        _page_options = ["📋 ตารางผ่าตัด", "📊 บริหารจัดการ", "⚙️ ตั้งค่า"]
+        try:
+            _default_page = st.query_params.get('page', _page_options[0])
+        except Exception:
+            _default_page = _page_options[0]
+        _default_idx = _page_options.index(_default_page) if _default_page in _page_options else 0
+
         page = st.radio(
             "📋 เมนูหลัก",
-            ["📋 ตารางผ่าตัด", "📊 บริหารจัดการ", "⚙️ ตั้งค่า"],
+            _page_options,
+            index=_default_idx,
+            key='_main_page',
         )
+        # อัพเดต URL เมื่อเปลี่ยนหน้า
+        try:
+            if page != _default_page:
+                st.query_params['page'] = page
+        except Exception:
+            pass
 
         st.markdown("---")
 

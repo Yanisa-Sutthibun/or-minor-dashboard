@@ -1421,7 +1421,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
             <span style="font-size:10px;color:#757575;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
               📑 ไปที่ section
             </span>
-            <span id="toc-minimize" title="ย่อหน้าต่าง" style="cursor:pointer;color:#9e9e9e;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px;user-select:none;">−</span>
+            <span id="toc-minimize" title="ย่อหน้าต่าง" onclick="window.__toc_minimize && window.__toc_minimize()" style="cursor:pointer;color:#9e9e9e;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px;user-select:none;">−</span>
           </div>
           <div style="display:flex;flex-direction:column;gap:2px;">
             <a class="toc-item" data-target="sec-kpi" style="display:block;font-size:13px;padding:6px 10px;border-radius:6px;color:#455a64;text-decoration:none;cursor:pointer;"><span style="color:#607d8b;margin-right:6px;">1</span>🎯 KPI Highlights</a>
@@ -1440,7 +1440,7 @@ def _render_historical_analytics(date_from: str, date_to: str):
 
         // 🔼 TOC แบบย่อ (ปุ่มเล็กกลม)
         const MINI_HTML = `
-        <div id="hist-toc-mini" title="เปิด TOC" style="
+        <div id="hist-toc-mini" title="เปิด TOC" onclick="window.__toc_expand && window.__toc_expand()" style="
             position: fixed; right: 20px; top: 120px;
             width: 44px; height: 44px; border-radius: 50%;
             background: white; border: 0.5px solid #e0e0e0;
@@ -1506,38 +1506,42 @@ def _render_historical_analytics(date_from: str, date_to: str):
             });
         }
 
-        // 🔽 Minimize → ซ่อน TOC แสดง mini button
-        const minBtn = parent.getElementById('toc-minimize');
-        const tocBox = parent.getElementById('hist-toc');
-        const miniBtn = parent.getElementById('hist-toc-mini');
-        if (minBtn) {
-            minBtn.addEventListener('click', () => {
-                tocBox.style.display = 'none';
-                miniBtn.style.display = 'flex';
-                window.parent.sessionStorage.setItem('hist_toc_collapsed', '1');
-            });
-            minBtn.addEventListener('mouseenter', () => {
-                minBtn.style.background = '#f5f5f5';
-                minBtn.style.color = '#424242';
-            });
-            minBtn.addEventListener('mouseleave', () => {
-                minBtn.style.background = 'transparent';
-                minBtn.style.color = '#9e9e9e';
-            });
+        // 🔽🔼 Toggle TOC ผ่าน global functions (robust — ไม่หลุดตอน rerun)
+        // ใช้ inline onclick attribute → ไม่ต้อง re-attach listener ทุกครั้ง
+        window.parent.__toc_minimize = function() {
+            const toc = parent.getElementById('hist-toc');
+            const mini = parent.getElementById('hist-toc-mini');
+            if (toc) toc.style.display = 'none';
+            if (mini) mini.style.display = 'flex';
+            window.parent.sessionStorage.setItem('hist_toc_collapsed', '1');
+        };
+        window.parent.__toc_expand = function() {
+            const toc = parent.getElementById('hist-toc');
+            const mini = parent.getElementById('hist-toc-mini');
+            if (toc) toc.style.display = 'block';
+            if (mini) mini.style.display = 'none';
+            window.parent.sessionStorage.setItem('hist_toc_collapsed', '0');
+        };
+        // Hover effects (ที่ยังต้องใช้ listener — แต่ไม่ critical ถ้าหลุด)
+        const _minBtn = parent.getElementById('toc-minimize');
+        const _miniBtn = parent.getElementById('hist-toc-mini');
+        if (_minBtn) {
+            _minBtn.onmouseenter = () => {
+                _minBtn.style.background = '#f5f5f5';
+                _minBtn.style.color = '#424242';
+            };
+            _minBtn.onmouseleave = () => {
+                _minBtn.style.background = 'transparent';
+                _minBtn.style.color = '#9e9e9e';
+            };
         }
-        // 🔼 Mini button → ขยาย TOC กลับ
-        if (miniBtn) {
-            miniBtn.addEventListener('click', () => {
-                tocBox.style.display = 'block';
-                miniBtn.style.display = 'none';
-                window.parent.sessionStorage.setItem('hist_toc_collapsed', '0');
-            });
-            miniBtn.addEventListener('mouseenter', () => {
-                miniBtn.style.transform = 'scale(1.08)';
-            });
-            miniBtn.addEventListener('mouseleave', () => {
-                miniBtn.style.transform = 'scale(1.0)';
-            });
+        if (_miniBtn) {
+            _miniBtn.onmouseenter = () => {
+                _miniBtn.style.transform = 'scale(1.08)';
+            };
+            _miniBtn.onmouseleave = () => {
+                _miniBtn.style.transform = 'scale(1.0)';
+            };
         }
 
         // Active state via IntersectionObserver
@@ -1669,8 +1673,11 @@ def _render_historical_analytics(date_from: str, date_to: str):
                                value_color='#c62828'), unsafe_allow_html=True)
 
     # ⚠️ ระดับความเร่งด่วน — Elective (มี breakdown นัดหมาย/Walk-in) / Urgent / Emergency
+    # 🆕 Filter เฉพาะเคสที่ผ่าตัดสำเร็จ (consistent กับ "เคสสะสม" 701)
     df_op = get_cases()
-    df_op = df_op[(df_op['op_date'] >= date_from) & (df_op['op_date'] <= date_to)]
+    df_op = df_op[(df_op['op_date'] >= date_from)
+                  & (df_op['op_date'] <= date_to)
+                  & (df_op['status'].isin(['post_op', 'discharged', 'done']))]
     if 'op_type' in df_op.columns:
         op_norm = (df_op['op_type'].fillna('elective')
                    .astype(str).str.lower().str.strip()
