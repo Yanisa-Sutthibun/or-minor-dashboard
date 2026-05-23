@@ -1281,4 +1281,8 @@ if __name__ == '__main__':
             print(f"  hn={s['hn']:>12s} op={s['op_date']}  "
                   f"in_or: {s['old_in_or'] or '-':<20s} {mark} {s['new_in_or'] or '-':<20s}")
         print(f"\nWill change: {info['changed']} rows, "
-              f"DB rows not in CSV: {info['not_found']}
+              f"DB rows not in CSV: {info['not_found']}")
+        if input("\nApply these updates? (y/n): ").strip().lower() == 'y':
+            info = reimport_timestamps(intra, dry_run=False)
+            print(f"Done. Updated {info['updated']} rows.")
+        sys.exit(0)

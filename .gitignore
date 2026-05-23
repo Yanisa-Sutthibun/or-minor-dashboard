@@ -13,9 +13,20 @@ case_history.csv
 *_fix*.py
 tracking_fix*.py
 db_fix.py
+_*.py
+check_nurses.py
 
 # ไฟล์เก่าที่ไม่ใช้
 minor_or_app_complete.py
+*_bak.py
+
+# Linux ghost files (WSL fuse)
+.fuse_hidden*
+
+# Personal notes / mockups / model backups
+mockups/
+*.pkl
+เผื่อลืม.txt
 
 # 🔒 Secrets — ห้าม commit password/credentials
 .streamlit/secrets.toml
