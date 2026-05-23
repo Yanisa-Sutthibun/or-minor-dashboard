@@ -526,30 +526,95 @@ def _render_executive_demo_summary():
 - **เคสทั้งหมด/ผ่าเสร็จ/ยกเลิก** — ตัวเลขสำคัญที่ต้องดู
 - **OPD/IPD** — ประเภทผู้ป่วย
 - **Walk-in/Elective/Urgent** — ความเร่งด่วน
+- **📅 Case set** — เคส elective ที่นัดหมาย/schedule ไว้ก่อนวันผ่า (pre-booked)
+- **🚨 Emergency** — เคสฉุกเฉินที่ทำทันที (แยกจาก Walk-in ปกติ)
+- **🌆 เคสรับเวร** — เคสที่ยังไม่เสร็จก่อน 15:30 → ส่งต่อเวรเย็น
 - **เวลารอเฉลี่ย** — KPI หลักของ patient experience
 - **Turnover** — ประสิทธิภาพการเปลี่ยนเคส (ยิ่งน้อยยิ่งดี)
 - **🤖 AI accuracy** — บอกว่า model แม่นแค่ไหน (±10 นาที)
 """)
 
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric("เคสทั้งหมด", "7")
-    r2.metric("ผ่าตัดสำเร็จ", "2")
-    r3.metric("ยกเลิก", "0", "อัตรา 0%")
-    r4.metric("Walk-in", "3", "43%")
+    # ─── Section header CSS (inline — กัน scope issue) ───
+    _SECTION_CSS = '''
+    <style>
+    .demo-section {
+        margin-top: 18px; margin-bottom: 6px;
+        padding: 8px 14px; border-radius: 8px 8px 0 0;
+        font-size: 13px; font-weight: 600;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .demo-section-overview  { background: #e3f2fd; color: #0d47a1; border-left: 4px solid #1565c0; }
+    .demo-section-casemix   { background: #f3e5f5; color: #4a148c; border-left: 4px solid #6a1b9a; }
+    .demo-section-perf      { background: #e8f5e9; color: #1b5e20; border-left: 4px solid #2e7d32; }
+    .demo-section-handover  { background: #fff3e0; color: #bf360c; border-left: 4px solid #e65100; }
+    .demo-section .demo-section-sub {
+        font-size: 11px; font-weight: 400; opacity: 0.75; margin-left: auto;
+    }
+    .demo-card-wrap {
+        background: #fafafa; border: 1px solid #f0f0f0;
+        border-radius: 0 0 8px 8px; padding: 12px 14px 6px;
+        margin-bottom: 4px;
+    }
+    </style>
+    '''
+    st.markdown(_SECTION_CSS, unsafe_allow_html=True)
 
-    r5, r6, r7, r8 = st.columns(4)
-    r5.metric("OPD", "6")
-    r6.metric("IPD", "1")
-    r7.metric("Elective", "5")
-    r8.metric("Urgent", "1")
+    # ═══ Group 1: ภาพรวมวันนี้ (สำคัญสุด) ═══
+    st.markdown('<div class="demo-section demo-section-overview">'
+                '📈 ภาพรวมวันนี้'
+                '<span class="demo-section-sub">สถานะการทำงาน</span></div>',
+                unsafe_allow_html=True)
+    with st.container():
+        st.markdown('<div class="demo-card-wrap">', unsafe_allow_html=True)
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("เคสทั้งหมด", "7")
+        a2.metric("✅ ผ่าตัดสำเร็จ", "2")
+        a3.metric("❌ ยกเลิก", "0", "อัตรา 0%")
+        a4.metric("🌆 รับเวร", "1",
+                  help="เคสที่ยังไม่เสร็จก่อน 15:30 → ส่งต่อเวรเย็น")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown('<div style="font-size:14px;font-weight:500;margin-bottom:6px;">'
-                '⏱️ เวลาที่น่าสนใจ (Demo)</div>', unsafe_allow_html=True)
-    t1, t2, t3 = st.columns(3)
-    t1.metric("เวลารอเฉลี่ย", "23 นาที", "-12 vs สัปดาห์ก่อน")
-    t2.metric("Turnover เฉลี่ย", "16 นาที", "เป้า ≤15")
-    t3.metric("AI accuracy", "78%", "±10 นาที")
+    # ═══ Group 2: Case Mix (ประเภท + ความเร่งด่วน) ═══
+    st.markdown('<div class="demo-section demo-section-casemix">'
+                '🏥 Case Mix'
+                '<span class="demo-section-sub">ประเภทผู้ป่วย + ความเร่งด่วน</span></div>',
+                unsafe_allow_html=True)
+    with st.container():
+        st.markdown('<div class="demo-card-wrap">', unsafe_allow_html=True)
+        # ประเภทผู้ป่วย
+        st.caption("ประเภทผู้ป่วย")
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("OPD", "6")
+        b2.metric("IPD", "1")
+        b3.empty(); b4.empty()
+        # ความเร่งด่วน
+        st.caption("ความเร่งด่วน + วิธีการเข้า")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("📅 Case set", "4",
+                  help="เคส elective ที่ schedule ไว้ก่อนวันผ่าตัด (pre-booked)")
+        c2.metric("🚶 Walk-in", "3", "43%",
+                  help="เคสที่มาเองวันนี้ — ไม่ได้นัด")
+        c3.metric("⚡ Urgent", "1",
+                  help="เคสด่วน — รอได้ไม่เกินหลายชั่วโมง")
+        c4.metric("🚨 Emergency", "1",
+                  help="เคสฉุกเฉินที่ต้องทำทันที — life-threatening")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # ═══ Group 3: Performance KPI ═══
+    st.markdown('<div class="demo-section demo-section-perf">'
+                '⏱️ Performance KPI'
+                '<span class="demo-section-sub">ประสิทธิภาพ + AI</span></div>',
+                unsafe_allow_html=True)
+    with st.container():
+        st.markdown('<div class="demo-card-wrap">', unsafe_allow_html=True)
+        p1, p2, p3 = st.columns(3)
+        p1.metric("เวลารอเฉลี่ย", "23 นาที", "-12 vs สัปดาห์ก่อน",
+                  help="เฉลี่ยเวลาที่คนไข้รอตั้งแต่ถึงห้องผ่าตัดจนเข้าห้อง")
+        p2.metric("🔄 Turnover เฉลี่ย", "16 นาที", "เป้า ≤15",
+                  help="เวลาเปลี่ยนเคส — ระหว่าง op_end เคสก่อน → in_or เคสถัดไป")
+        p3.metric("🤖 AI accuracy", "78%", "±10 นาที",
+                  help="% เคสที่ AI ทำนายเวลาห้องได้แม่นภายใน ±10 นาที")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown(
         '<div style="background:#e8f5e9;border-radius:8px;padding:12px 16px;'
