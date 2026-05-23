@@ -61,6 +61,13 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# Inject central enterprise theme
+try:
+    from ui_theme import inject_theme as _inject_theme
+    _inject_theme()
+except Exception:
+    pass
+
 # --- Auto-refresh ทุก 30 นาที (1800000 ms) ---
 st.markdown(
     '<script>setTimeout(function(){window.location.reload();}, 1800000);</script>',

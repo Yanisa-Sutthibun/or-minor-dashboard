@@ -175,6 +175,11 @@ def _build_nurse_options(room_no: int) -> list:
 
 
 def _inject_css():
+    try:
+        from ui_theme import inject_theme
+        inject_theme()
+    except Exception:
+        pass
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
