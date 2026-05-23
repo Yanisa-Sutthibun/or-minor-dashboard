@@ -17,5 +17,15 @@ db_fix.py
 # ไฟล์เก่าที่ไม่ใช้
 minor_or_app_complete.py
 
-# 🔒 Secrets (Streamlit) — ห้าม commit password
+# 🔒 Secrets — ห้าม commit password/credentials
 .streamlit/secrets.toml
+.env
+.env.local
+.env.*.local
+
+# 📦 SQLite local exports (สำหรับ migrate ไป Supabase)
+supabase/data_export/
+
+# 🎭 Staff mapping (ห้าม leak — ใช้ decode masked codes กลับเป็นชื่อจริง)
+staff_mapping.csv
+staff_mapping*.csv

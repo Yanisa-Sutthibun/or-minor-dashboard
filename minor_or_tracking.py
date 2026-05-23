@@ -303,23 +303,24 @@ def _assign_waiting_room(procedure_name: str) -> str:
 # 🎬 EXECUTIVE DEMO — Full Flow (มีผู้ป่วย → discharge)
 # ════════════════════════════════════════════════════════════════════
 _DEMO_PATIENTS_FULL = [
+    # ⚠️ ชื่อ-สกุล ทั้งหมดเป็น FAKE สำหรับ demo เท่านั้น (ห้ามใช้ชื่อคนไข้จริง)
     {'cid': 9001, 'status': 'scheduled',
-     'name': 'น.ส.ปาริชาติ ม.', 'hn': '660044556', 'age': 42,
+     'name': 'น.ส.ปาริชาติ มงคลศิริ', 'hn': '660044556', 'age': 42,
      'proc': 'Excision skin lesion at scalp', 'dx': 'Skin Lesion',
      'surgeon': 'แพทย์หญิงดารัตน์', 'estimated_time': '14:30', 'ai_pred': 25,
      'note': 'เคส elective นัดล่วงหน้า · AI ทำนาย 25 น.'},
     {'cid': 9004, 'status': 'in_or', 'room': 1,
-     'name': 'นายภัทรเดช ว.', 'hn': '690009822', 'age': 36,
+     'name': 'นายภัทรเดช วงศ์สวัสดิ์', 'hn': '690009822', 'age': 36,
      'proc': 'Morpheus (Aging Face)', 'dx': 'Aging Face',
      'surgeon': 'พ.ต.อ.เฉลิมเกียรติ', 'in_or_min': 18, 'ai_pred': 30,
      'note': '🤖 AI: ใช้ห้อง 30 น. · ผ่าไป 18 น. · เหลือ ~12 น.'},
     {'cid': 9005, 'status': 'post_op__recovery',
-     'name': 'นางสุปรานี เ.', 'hn': '590018522', 'age': 59,
+     'name': 'นางสุปรานี เพ็ญพิศุทธิ์', 'hn': '590018522', 'age': 59,
      'proc': 'I and D abscess at back', 'dx': 'Abscess',
      'surgeon': 'แพทย์หญิงวริศฐา', 'duration_min': 16, 'recovery_min': 10,
      'note': 'ผ่าจริง 16 น. · พักฟื้น 10 น. · เตรียม discharge'},
     {'cid': 9006, 'status': 'discharged',
-     'name': 'นายพลเทพ เ.', 'hn': '531479595', 'age': 82,
+     'name': 'นายพลเทพ เอกอนันต์', 'hn': '531479595', 'age': 82,
      'proc': 'Correction upper eyelid', 'dx': 'Ptosis upper eyelid',
      'surgeon': 'พ.ต.อ.เฉลิมเกียรติ', 'duration_min': 50, 'discharged_at': '13:25',
      'note': 'ใช้เวลาผ่า 50 น. · กลับบ้าน 13:25'},
@@ -427,6 +428,26 @@ def _render_executive_demo_or():
         <div style="margin-top:6px;padding:6px 10px;background:#e3f2fd;border-radius:4px;
                     font-size:11px;color:#1565c0;font-style:italic;">💡 {p['note']}</div>
     </div>""", unsafe_allow_html=True)
+
+    # 🎬 Demo: disabled action buttons (โชว์ผู้บริหารว่ามี action อะไรบ้าง)
+    st.caption("👇 ปุ่ม action ที่พยาบาลจะกดในเคสจริง (demo — disabled)")
+    db1, db2, db3 = st.columns(3)
+    db1.button("✅ ผ่าเสร็จแล้ว", key='demo_iorbtn_end',
+               disabled=True, type='primary', use_container_width=True,
+               help="(เคสจริง) เปิด pop-up เลือกปลายทาง: 🛏️ ห้องพักฟื้น หรือ 🛗 ห้องรับ-ส่ง → บันทึกเวลาออกห้อง")
+    db2.button("⬅️ ย้อนกลับ", key='demo_iorbtn_back',
+               disabled=True, use_container_width=True,
+               help="(เคสจริง) ย้อนกลับเป็น 'รอตรวจรับ' กรณีกดผิด")
+    db3.button("❌ ยกเลิกเคสผ่าตัด", key='demo_iorbtn_canc',
+               disabled=True, use_container_width=True,
+               help="(เคสจริง) ยกเลิกเคสกลางผ่า + บันทึกเหตุผล")
+    db4, db5 = st.columns(2)
+    db4.button("🔧 ปรับระยะเวลาใช้ห้อง", key='demo_iorbtn_override',
+               disabled=True, use_container_width=True,
+               help="(เคสจริง) Override เวลาที่ AI ทำนาย — กรณีหมอแจ้งใช้นานหรือสั้นกว่า")
+    db5.button("💾 บันทึกพยาบาล", key='demo_iorbtn_nurse',
+               disabled=True, use_container_width=True,
+               help="(เคสจริง) เพิ่ม/เปลี่ยน Scrub & Circulating Nurse")
 
 
 def _render_executive_demo_recovery():
@@ -592,12 +613,12 @@ def _render_executive_demo_queue():
     demo_rooms = [
         ('🔬 ห้องผ่าตัด 1', 'Laser / Morpheus / Scaret / Emsculpt / Cooltect / Q-Switch', 2,
          [
-            {'name': 'นายภัทรเดช ว.', 'hn': '690009822',
+            {'name': 'นายภัทรเดช วงศ์สวัสดิ์', 'hn': '690009822',
              'proc': 'Morpheus (Aging Face)', 'surgeon': 'พ.ต.อ.เฉลิมเกียรติ',
              'wait_min': 67, 'color': '#c62828', 'emoji': '🔴', 'level': 'รอนาน',
              'eta': '14:35', 'time_to_eta': 'อีก 12 น.',
              'note': 'AI: เคสกำลังผ่าใช้ 25 น. (เหลือ 12 น.)'},
-            {'name': 'น.ส.รัฐธีร์ ไ.', 'hn': '690011149',
+            {'name': 'น.ส.รัฐธีร์ ไกรเลิศ', 'hn': '690011149',
              'proc': 'Morpheus (Aging Face)', 'surgeon': 'พ.ต.อ.เฉลิมเกียรติ',
              'wait_min': 28, 'color': '#e65100', 'emoji': '🟡', 'level': 'รอ',
              'eta': '15:05', 'time_to_eta': 'อีก 42 น.',
@@ -605,7 +626,7 @@ def _render_executive_demo_queue():
          ]),
         ('🔧 ห้องผ่าตัด 3', 'ESWL', 1,
          [
-            {'name': 'นางสาวสุดารัตน์ ก.', 'hn': '670022345',
+            {'name': 'นางสาวสุดารัตน์ กิตติภัทร์', 'hn': '670022345',
              'proc': 'ESWL Lt. Renal stone', 'surgeon': 'พ.ต.ท.พงศ์ธร',
              'wait_min': 15, 'color': '#2e7d32', 'emoji': '🟢', 'level': 'พึ่งมา',
              'eta': '14:50', 'time_to_eta': 'อีก 27 น.',
@@ -613,7 +634,7 @@ def _render_executive_demo_queue():
          ]),
         ('🏥 ห้องผ่าตัด 4-5', 'เคสทั่วไป (Excision / I&D / Stitch off)', 2,
          [
-            {'name': 'น.ส.มาลี ส.', 'hn': '680033456',
+            {'name': 'น.ส.มาลี สายสวรรค์', 'hn': '680033456',
              'proc': 'I&D abscess at back', 'surgeon': 'แพทย์หญิงวริศฐา',
              'wait_min': 5, 'color': '#2e7d32', 'emoji': '🟢', 'level': 'พึ่งมา',
              'eta': '14:30', 'time_to_eta': 'อีก 7 น.',
@@ -1565,6 +1586,35 @@ def _render_actions(cid, status, row=None):
                     st.rerun()
                 else:
                     st.info("ℹ️ ไม่มีการเปลี่ยนแปลง")
+
+        # 🔧 Override AI prediction (override เวลาที่ AI ทำนาย)
+        _ai_pred = int(row.get('ai_predicted_min') or 0)
+        _cur_override = row.get('user_override_min')
+        if _cur_override:
+            _override_label = f"🔧 ปรับเวลา AI (override = {_cur_override} น. · AI ทำนาย {_ai_pred} น.)"
+        else:
+            _override_label = f"🔧 ปรับเวลา AI ทำนาย (AI ทำนาย {_ai_pred} น.)"
+        with st.expander(_override_label, expanded=False):
+            st.caption("ใช้เมื่อหมอแจ้งว่าเคสจะใช้เวลา**นานหรือสั้นกว่า**ที่ AI ทำนาย — "
+                       "ค่านี้จะ override AI prediction ในห้องตอน countdown")
+            o_col1, o_col2 = st.columns([3, 1])
+            with o_col1:
+                _new_override = st.number_input(
+                    "เวลาที่ override (นาที)", min_value=0, max_value=480,
+                    value=int(_cur_override or _ai_pred or 30), step=5,
+                    key=f"override_{cid}", label_visibility='collapsed')
+            with o_col2:
+                if st.button("💾 บันทึก", key=f"save_override_{cid}",
+                             use_container_width=True):
+                    update_case(cid, user_override_min=int(_new_override))
+                    st.success(f"✅ override = {int(_new_override)} น.")
+                    st.rerun()
+            if _cur_override:
+                if st.button("🔙 ใช้ AI ทำนายเดิม", key=f"reset_override_{cid}",
+                             use_container_width=True):
+                    update_case(cid, user_override_min=None)
+                    st.success("✅ กลับมาใช้ AI prediction เดิม")
+                    st.rerun()
 
         dest = st.radio("หลังผ่าเสร็จ ส่งไป:",
                         ["🛗 รับส่ง", "🛏️ ห้องพักฟื้น"],

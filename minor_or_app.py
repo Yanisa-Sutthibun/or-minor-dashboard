@@ -97,8 +97,16 @@ def page_room_settings():
         5: {'label': 'ห้อง 5 — ผ่าตัดทั่วไป', 'desc': 'เคสผ่าตัดอื่นๆ'},
     }
 
-    st.markdown('<h1 class="header-title">⚙️ ตั้งค่าห้องผ่าตัดเล็ก</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="color:#7f8c8d;font-size:14px;">ตั้งค่าสถานะ + พยาบาล Scrub / Circulating ประจำห้อง — เคสที่เข้าห้องจะ auto-fill ให้</p>', unsafe_allow_html=True)
+    # Unified page header — สอดคล้องกับ tracking/admin (light blue gradient)
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);'
+        'border-radius:12px;padding:18px 24px;margin-bottom:14px;">'
+        '<h2 style="margin:0;color:#1565c0;font-size:26px;">⚙️ ตั้งค่าห้องผ่าตัดเล็ก</h2>'
+        '<p style="margin:4px 0 0;color:#1976d2;font-size:14px;">'
+        'ตั้งค่าสถานะ + พยาบาล Scrub / Circulating ประจำห้อง — '
+        'เคสที่เข้าห้องจะ auto-fill ให้</p></div>',
+        unsafe_allow_html=True,
+    )
 
     nurse_options = ['— ยังไม่ระบุ —'] + OR_NURSE_LIST
     _NONE = '— ยังไม่ระบุ —'

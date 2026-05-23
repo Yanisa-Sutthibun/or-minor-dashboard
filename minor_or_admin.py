@@ -89,13 +89,14 @@ def group_top_procedures(proc_df: pd.DataFrame, top_n: int = 10,
 
 _ADMIN_CSS = """
 <style>
+/* Unified page header — สอดคล้องกับ tracking/settings */
 .admin-header {
-    background: linear-gradient(135deg, #1a237e, #283593);
-    color: white; padding: 18px 24px; border-radius: 12px;
-    margin-bottom: 20px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    padding: 18px 24px; border-radius: 12px;
+    margin-bottom: 14px;
 }
-.admin-header h1 { margin: 0; font-size: 24px; }
-.admin-header p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+.admin-header h1 { margin: 0; font-size: 26px; color: #1565c0; }
+.admin-header p { margin: 4px 0 0; font-size: 14px; color: #1976d2; }
 
 .room-card {
     border-radius: 12px; padding: 16px; text-align: center;
@@ -335,16 +336,14 @@ def _get_demo_kpi(current_sim_min):
 
 def _render_cost_entry_tab():
     """Quick Cost Entry — เลือกวันแล้วกรอกราคาทีละหลายเคสในตารางเดียว."""
-    import sqlite3
-    from minor_or_db import DB_PATH
+    from minor_or_db import get_conn
 
     st.markdown("### 💰 ใส่ราคาผ่าตัด + ราคา patho รายวัน")
     st.caption("เลือกวันแล้วแก้ราคาในตารางได้เลย — ระบบจะ suggest ราคาจากเคสคล้ายๆ ในอดีตให้")
 
     # ── Date picker — default = วันล่าสุดที่มีเคสยังไม่มี cost ──
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""
+    conn = get_conn()
+    cur = conn.execute("""
         SELECT op_date FROM cases
         WHERE (treatment_cost IS NULL OR treatment_cost = 0)
         ORDER BY op_date DESC LIMIT 1
@@ -465,11 +464,11 @@ def _render_cost_entry_tab():
                   delta=f"ผ่า {total_treat:,} + patho {total_patho:,}")
 
     if save_clicked:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
+        from minor_or_db import get_conn
+        conn = get_conn()
         n_updated = 0
         for _, row in edited.iterrows():
-            cur.execute(
+            cur = conn.execute(
                 "UPDATE cases SET treatment_cost=?, patho_cost=? WHERE case_id=?",
                 (int(row['ราคาผ่า']), int(row['ราคา patho']), int(row['case_id']))
             )

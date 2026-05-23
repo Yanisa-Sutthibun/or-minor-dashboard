@@ -9,12 +9,37 @@ Case category logic:
 Plus walk-in import from cost Excel for cases not in schedule.csv.
 """
 import pandas as pd
-import sqlite3
+import sqlite3  # kept for exception types only
 import os
 import sys
 from datetime import datetime
 
+from db_connection import get_connection, IS_POSTGRES
+
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'minor_or.db')
+
+
+def _conn():
+    """Local connection helper — รองรับทั้ง SQLite และ Supabase"""
+    return get_connection(DB_PATH)
+
+
+def _get_table_columns(conn, table_name: str) -> set:
+    """Cross-DB helper: คืน set ชื่อ column ของ table
+
+    SQLite: PRAGMA table_info
+    PostgreSQL: information_schema.columns
+    """
+    if IS_POSTGRES:
+        cur = conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = ? AND table_schema = 'public'",
+            (table_name,)
+        )
+        return {r[0] for r in cur.fetchall()}
+    else:
+        return {r[1] for r in conn.execute(
+            f"PRAGMA table_info({table_name})").fetchall()}
 
 
 def _classify_case_category(req_iso, op_iso):
@@ -122,23 +147,30 @@ def import_historical(sched_path: str, intra_path: str, dry_run: bool = False):
         intra_lookup[key] = row
     
     # Connect DB
-    conn = sqlite3.connect(DB_PATH)
-    
-    # Ensure diagnosis column exists
-    existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(cases)").fetchall()}
+    conn = _conn()
+
+    # Ensure columns exist — cross-DB friendly
+    existing_cols = _get_table_columns(conn, 'cases')
     if 'diagnosis' not in existing_cols:
-        conn.execute("ALTER TABLE cases ADD COLUMN diagnosis TEXT")
-        conn.commit()
-    
+        try:
+            conn.execute("ALTER TABLE cases ADD COLUMN diagnosis TEXT")
+            conn.commit()
+        except Exception:
+            pass  # column may already exist (PostgreSQL strict)
+        existing_cols.add('diagnosis')
+
     inserted = 0
     updated = 0   # incremental UPDATE counter
     skipped = 0   # legacy — kept for backward compat (always 0 now)
     results = []
-    
+
     # Ensure requested_date column exists (for traceability + future reclassification)
     if 'requested_date' not in existing_cols:
-        conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
-        conn.commit()
+        try:
+            conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
+            conn.commit()
+        except Exception:
+            pass
         existing_cols.add('requested_date')
 
     skipped_no_date = 0
@@ -336,10 +368,10 @@ def reclassify_existing(sched_path: str, dry_run: bool = False):
     sched['_req_date'] = sched['reqdate'].apply(_norm_date)
     sched['_hn'] = sched['hn'].astype(str).str.strip()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _conn()
 
     # Make sure requested_date column exists
-    existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(cases)").fetchall()}
+    existing_cols = _get_table_columns(conn, 'cases')
     if 'requested_date' not in existing_cols:
         conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
         conn.commit()
@@ -463,7 +495,7 @@ def reimport_timestamps(intra_path: str, dry_run: bool = False):
     intra['_op_date'] = intra['opedate'].apply(_norm_date)
     intra['_hn'] = intra['hn'].astype(str).str.strip()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _conn()
 
     updated = 0
     not_found = 0
@@ -607,7 +639,7 @@ def merge_costs_from_excel(cost_path: str, dry_run: bool = False) -> dict:
         return {'error': f'ขาด columns: {missing}',
                 'matched': 0, 'not_found': 0, 'samples': []}
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _conn()
     matched = 0
     not_found = 0
     samples = []
@@ -701,10 +733,9 @@ def import_walkins_from_cost_excel(cost_path: str,
         return {'error': f'ขาด columns: {missing}',
                 'inserted': 0, 'skipped_already_exists': 0, 'samples': []}
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _conn()
     # Make sure requested_date column exists
-    existing_cols = {r[1] for r in conn.execute(
-        "PRAGMA table_info(cases)").fetchall()}
+    existing_cols = _get_table_columns(conn, 'cases')
     if 'requested_date' not in existing_cols:
         conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
         conn.commit()
@@ -834,9 +865,8 @@ def import_merged_csv(csv_path: str, dry_run: bool = False) -> dict:
         return {'error': f'CSV ขาด columns: {missing}',
                 'inserted': 0, 'skipped': 0}
 
-    conn = sqlite3.connect(DB_PATH)
-    existing_cols = {r[1] for r in conn.execute(
-        "PRAGMA table_info(cases)").fetchall()}
+    conn = _conn()
+    existing_cols = _get_table_columns(conn, 'cases')
     if 'requested_date' not in existing_cols:
         conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
         conn.commit()
@@ -971,9 +1001,8 @@ def import_cost_driven(cost_path: str,
                 continue
             intra_lookup[(r['_hn'], r['_date'])] = r.to_dict()
 
-    conn = sqlite3.connect(DB_PATH)
-    existing_cols = {r[1] for r in conn.execute(
-        "PRAGMA table_info(cases)").fetchall()}
+    conn = _conn()
+    existing_cols = _get_table_columns(conn, 'cases')
     if 'requested_date' not in existing_cols:
         conn.execute("ALTER TABLE cases ADD COLUMN requested_date TEXT")
         conn.commit()
@@ -1252,25 +1281,4 @@ if __name__ == '__main__':
             print(f"  hn={s['hn']:>12s} op={s['op_date']}  "
                   f"in_or: {s['old_in_or'] or '-':<20s} {mark} {s['new_in_or'] or '-':<20s}")
         print(f"\nWill change: {info['changed']} rows, "
-              f"DB rows not in CSV: {info['not_found']}")
-        if input("\nApply these updates? (y/n): ").strip().lower() == 'y':
-            info = reimport_timestamps(intra, dry_run=False)
-            print(f"Done. Updated {info['updated']} rows.")
-        sys.exit(0)
-
-    # Normal import flow
-    if not os.path.exists(sched) or not os.path.exists(intra):
-        print("Please place 111.csv and รอลบ.csv in the same folder")
-        sys.exit(1)
-
-    # Dry run first
-    n, s, results = import_historical(sched, intra, dry_run=True)
-    print(f"\n=== DRY RUN ===")
-    print(f"Would insert: {n} cases, skip (duplicate): {s}")
-    for r in results:
-        print(f"  {r['date']} | {r['name'][:20]:20s} | {r['proc']:15s} | {r['status']:10s} | {r['duration'] or '-':>4} min | wait {r['wait'] or '-':>3} min | Dx: {r['diag'] or '-'}")
-
-    # Actual import
-    if input("\nProceed with import? (y/n): ").strip().lower() == 'y':
-        n, s, _ = import_historical(sched, intra, dry_run=False)
-        print(f"\nDone! Inserted {n}, skipped {s}")
+              f"DB rows not in CSV: {info['not_found']}

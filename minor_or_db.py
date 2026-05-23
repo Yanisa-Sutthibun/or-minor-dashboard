@@ -1,14 +1,23 @@
 """
-Minor OR Database — SQLite Adapter v2 (Workflow Edition)
+Minor OR Database — SQLite / Supabase PostgreSQL Adapter v3
 Status flow: scheduled → arrived → in_or → post_op → discharged | cancelled
+
+DB mode determined by .streamlit/secrets.toml:
+  - db_mode = "sqlite"   → local minor_or.db (default)
+  - db_mode = "supabase" → Supabase PostgreSQL (cloud)
 """
 import re
-import sqlite3
+import sqlite3  # kept for exception types + sqlite fallback
 import os
 import statistics
 import pandas as pd
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
+
+from db_connection import get_connection, IS_POSTGRES, IS_SQLITE, get_db_info
+# Staff de-mask layer — แปลง SURG_001 → ชื่อจริง สำหรับ display
+# (no-op ถ้า mapping file ไม่มี เช่น on Streamlit Cloud deploy)
+from staff_unmask import apply_to_dataframe as _unmask_display, unmask_series as _unmask_series
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(_SCRIPT_DIR, 'minor_or.db')
@@ -290,16 +299,29 @@ def clear_all_data() -> dict:
             try:
                 n = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
                 conn.execute(f"DELETE FROM {tbl}")
-                # reset auto-increment counter ด้วย (ถ้าใช้ INTEGER PRIMARY KEY)
-                conn.execute(f"DELETE FROM sqlite_sequence WHERE name='{tbl}'")
+                # reset auto-increment counter
+                if IS_POSTGRES:
+                    # PostgreSQL: reset SERIAL sequence (ถ้ามี)
+                    try:
+                        seq_name = f"{tbl}_{ {'cases':'case_id','audit_log':'log_id','room_settings':'room_no'}[tbl] }_seq"
+                        conn.execute(f"SELECT setval('{seq_name}', 1, false)")
+                    except Exception:
+                        pass
+                else:
+                    # SQLite: ลบ row จาก sqlite_sequence
+                    try:
+                        conn.execute(f"DELETE FROM sqlite_sequence WHERE name='{tbl}'")
+                    except Exception:
+                        pass
                 result[tbl] = int(n)
-            except sqlite3.OperationalError:
-                # table อาจยังไม่ถูก create ใน schema เก่า — ข้าม
+            except Exception:
+                # table อาจยังไม่ถูก create — ข้าม (sqlite3.OperationalError หรือ psycopg2.Error)
                 result[tbl] = 0
         conn.commit()
-        # VACUUM ต้องรันนอก transaction
-        conn.isolation_level = None
-        conn.execute("VACUUM")
+        # VACUUM ต้องรันนอก transaction (เฉพาะ SQLite — postgres auto vacuum)
+        if IS_SQLITE:
+            conn.isolation_level = None
+            conn.execute("VACUUM")
     finally:
         conn.close()
     # ตั้ง flag กัน auto-import วิ่งทับเมื่อ reboot
@@ -326,7 +348,8 @@ def get_db_table_counts() -> dict:
             try:
                 out[tbl] = int(conn.execute(
                     f"SELECT COUNT(*) FROM {tbl}").fetchone()[0])
-            except sqlite3.OperationalError:
+            except Exception:
+                # table อาจไม่ exist — รองรับทั้ง sqlite3/psycopg2 errors
                 out[tbl] = 0
         return out
     finally:
@@ -432,11 +455,8 @@ _UPDATABLE_COLS = {
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    conn.row_factory = sqlite3.Row
-    return conn
+    """รับ connection — อัตโนมัติเลือก SQLite/Supabase ตาม secrets.db_mode"""
+    return get_connection(DB_PATH, timeout=10)
 
 
 class db_session:
@@ -457,7 +477,26 @@ class db_session:
 
 
 def init_db():
-    """Create table + migrate old schema if needed."""
+    """Create table + migrate old schema if needed.
+
+    Postgres mode: schema มีอยู่แล้วใน Supabase (สร้างจาก schema_postgres.sql)
+                   → แค่ verify connectivity + ข้าม migration scripts
+    """
+    if IS_POSTGRES:
+        # Verify connection + tables exist
+        try:
+            conn = get_conn()
+            cur = conn.execute("SELECT COUNT(*) FROM cases LIMIT 1")
+            cur.fetchone()
+            conn.close()
+        except Exception as e:
+            raise RuntimeError(
+                f"❌ ไม่สามารถเชื่อมต่อ Supabase ได้: {e}\n"
+                f"   ตรวจสอบ .streamlit/secrets.toml → database_url"
+            ) from e
+        return
+
+    # ─── SQLite path: original logic ───
     conn = get_conn()
     # Main table (no CHECK on status — enforce in Python for flexibility)
     conn.executescript("""
@@ -593,19 +632,21 @@ def _get_app_setting(key: str, default: str = '') -> str:
         row = conn.execute(
             "SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
         return row[0] if row else default
-    except sqlite3.OperationalError:
-        # table may not exist yet during migration
+    except Exception:
+        # table may not exist yet during migration — รองรับทั้ง sqlite/psycopg2
         return default
     finally:
         conn.close()
 
 
 def _set_app_setting(key: str, value: str) -> None:
-    """Write an app_settings value (upsert)."""
+    """Write an app_settings value (upsert) — works with both SQLite 3.24+ and PostgreSQL."""
     conn = get_conn()
     try:
+        # ใช้ ON CONFLICT แทน INSERT OR REPLACE (PostgreSQL & SQLite ≥3.24 รองรับทั้งคู่)
         conn.execute(
-            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
             (key, str(value)))
         conn.commit()
     finally:
@@ -668,7 +709,13 @@ def _reclassify_patient_type(conn):
 
 
 def _migrate_v2(conn):
-    """Migrate v1 table (with CHECK constraint) to v2 (no CHECK on status)."""
+    """Migrate v1 table (with CHECK constraint) to v2 (no CHECK on status).
+
+    Postgres mode: schema สร้างจาก schema_postgres.sql แล้ว → ข้าม
+    """
+    if IS_POSTGRES:
+        return  # schema ใน Supabase ครบแล้ว ไม่ต้อง migrate
+
     existing = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
 
     # Check if table has CHECK constraint on status
@@ -1278,18 +1325,20 @@ def get_cases(op_date: str = None, status: str = None) -> pd.DataFrame:
             q += " AND status=?"
             params.append(status)
         q += " ORDER BY case_id"
-        return pd.read_sql_query(q, conn, params=params)
+        df = pd.read_sql_query(q, conn, params=params)
+        return _unmask_display(df)  # 🎭 SURG_xxx → ชื่อจริง สำหรับ UI
 
 
 def get_pending_calls(days_back: int = 7) -> pd.DataFrame:
     with db_session() as conn:
         cutoff = (_now_dt() - timedelta(days=days_back)).strftime('%Y-%m-%d')
-        return pd.read_sql_query("""
+        df = pd.read_sql_query("""
             SELECT * FROM cases
             WHERE status='discharged' AND patient_type != 'IPD'
             AND post_call=0 AND op_date >= ?
             ORDER BY op_date, case_id
         """, conn, params=[cutoff])
+        return _unmask_display(df)
 
 
 def update_case(case_id: int, **kwargs):
@@ -1749,6 +1798,7 @@ def get_workload(op_date: str = None) -> dict:
         FROM cases {w} AND surgeon_name IS NOT NULL AND surgeon_name != ''
         GROUP BY surgeon_name ORDER BY n DESC LIMIT 8
     """, conn, params=p)
+    top_surgeons = _unmask_display(top_surgeons)  # 🎭 SURG_xxx → ชื่อจริง
 
     div_stats = pd.read_sql_query(f"""
         SELECT division_code, COUNT(*) as n FROM cases {w}
@@ -1804,6 +1854,9 @@ def get_nurse_stats(date_from: str = None, date_to: str = None) -> dict:
 
     if df.empty:
         return {'nurse_summary': pd.DataFrame(), 'nurse_cases': pd.DataFrame()}
+
+    # 🎭 Unmask SCRUB_xxx / CIRC_xxx / SURG_xxx → ชื่อจริง ก่อน split + groupby
+    df = _unmask_display(df)
 
     # Unpivot: สร้าง row per nurse per role (รองรับ comma-separated หลายชื่อ)
     rows = []
@@ -2259,6 +2312,9 @@ def get_surgeon_list(date_from: str = None, date_to: str = None,
         return pd.DataFrame(columns=['surgeon', 'n_scheduled',
                                      'n_actual', 'n_delegated'])
 
+    # 🎭 Unmask SURG_xxx → ชื่อจริง ก่อน normalize (mapping มีชื่อพร้อมยศ)
+    df = _unmask_display(df)
+
     # Normalize ทั้ง 2 คอลัมน์ (ตัดยศ/คำนำหน้า)
     df['sched_clean'] = df['scheduled_surgeon'].fillna('').astype(str).apply(
         _normalize_proxy_for_surgeon)
@@ -2324,6 +2380,9 @@ def get_surgeon_detail(surgeon: str, date_from: str = None,
     if df.empty:
         return {'n_scheduled': 0, 'n_actual': 0, 'n_delegated': 0,
                 'top_procedures': pd.DataFrame()}
+
+    # 🎭 Unmask SURG_xxx → ชื่อจริง ก่อน normalize
+    df = _unmask_display(df)
 
     df['sched_clean'] = df['scheduled_surgeon'].fillna('').astype(str).apply(
         _normalize_proxy_for_surgeon)
@@ -2578,6 +2637,7 @@ def get_handover_stats(date_from: str = None, date_to: str = None) -> dict:
     """, conn, params=params)
     if not handover_cases.empty and 'division_code' in handover_cases.columns:
         handover_cases['division_name'] = handover_cases['division_code'].apply(div_name)
+    handover_cases = _unmask_display(handover_cases)  # 🎭 SURG_xxx → ชื่อจริง
 
     # สรุปรายเดือน — เคสกี่เคส + รวม overtime กี่ชั่วโมง
     monthly = pd.read_sql_query(f"""
